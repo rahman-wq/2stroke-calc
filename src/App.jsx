@@ -66,53 +66,45 @@ function calcExhaustData(p) {
   }
 }
 
-function calcPortData(p) {
-  const { bore, stroke, conrod, E, C, Et, Vc, rpm } = p
+function calcPortData({ bore, stroke, rod, E_from_top, C, Et_from_top, vc, rpm }) {
   const R = stroke / 2
+  const E_bell  = R + rod + C - E_from_top
+  const Et_bell = R + rod + C - Et_from_top
+  const maxE = (R + rod + C + R).toFixed(1)
+  const minE = (R + rod + C - R).toFixed(1)
 
-  const T = R + conrod + C - E
-  const ratio = T / R
-  let exDur = null, exDurValid = true
-  if (Math.abs(ratio) > 1) { exDurValid = false }
-  else { exDur = (180 - toDeg(Math.acos(ratio))) * 2 }
+  if (Math.abs(E_bell / R) > 1) {
+    return { error: `E tidak valid: E_bell=${E_bell.toFixed(1)}, R=${R}. Pastikan E antara ${minE}–${maxE} mm` }
+  }
+  if (Math.abs(Et_bell / R) > 1) {
+    return { error: `Et tidak valid: Et_bell=${Et_bell.toFixed(1)}, R=${R}. Pastikan Et antara ${minE}–${maxE} mm` }
+  }
 
-  const T_tr = R + conrod + C - Et
-  const ratioTr = T_tr / R
-  let trDur = null, trDurValid = true
-  if (Math.abs(ratioTr) > 1) { trDurValid = false }
-  else { trDur = (180 - toDeg(Math.acos(ratioTr))) * 2 }
-
-  const blowdown = exDur !== null && trDur !== null ? exDur - trDur : null
+  const dur_ex = (180 - toDeg(Math.acos(E_bell / R))) * 2
+  const dur_tr = (180 - toDeg(Math.acos(Et_bell / R))) * 2
+  const blowdown = dur_ex - dur_tr
   let blowdownStatus = 'ok'
-  if (blowdown !== null) {
-    if (blowdown < 20) blowdownStatus = 'danger'
-    else if (blowdown > 40) blowdownStatus = 'warn'
-  }
+  if (blowdown < 20) blowdownStatus = 'danger'
+  else if (blowdown > 40) blowdownStatus = 'warn'
 
-  const Vd = (Math.PI / 4) * bore * bore * stroke / 1000
-  const Cr = Vc > 0 ? (Vd + Vc) / Vc : null
-  let crStatus = 'ok'
-  if (Cr !== null) {
-    if (Cr > 14) crStatus = 'danger'
-    else if (Cr > 13) crStatus = 'warn'
-  }
+  const vd = (Math.PI / 4) * bore * bore * stroke / 1000
+  const cr = vc > 0 ? (vd + vc) / vc : null
+  const piston_speed = 2 * stroke * rpm / 60 / 1000
 
-  const Vp = 2 * stroke * rpm / 60 / 1000
-  let vpStatus = 'ok'
-  if (Vp > 20) vpStatus = 'danger'
-  else if (Vp >= 15) vpStatus = 'warn'
-
-  const EPO = exDur !== null ? 180 - exDur / 2 : null
-  const EPC = exDur !== null ? 180 + exDur / 2 : null
-  const TPO = trDur !== null ? 180 - trDur / 2 : null
-  const TPC = trDur !== null ? 180 + trDur / 2 : null
+  const epo = 180 - dur_ex / 2
+  const epc = 180 + dur_ex / 2
+  const tpo = 180 - dur_tr / 2
+  const tpc = 180 + dur_tr / 2
 
   return {
-    exDur, exDurValid, trDur, trDurValid,
-    blowdown, blowdownStatus,
-    Vd, Cr, crStatus,
-    Vp, vpStatus,
-    EPO, EPC, TPO, TPC,
+    dur_ex, dur_tr, blowdown, blowdownStatus,
+    vd, cr, piston_speed,
+    epo, epc, tpo, tpc,
+    E_bell, Et_bell, R,
+    // aliases for Viewer3D backward compat
+    exDur: dur_ex, trDur: dur_tr,
+    Vd: vd, Cr: cr, Vp: piston_speed,
+    EPO: epo, EPC: epc, TPO: tpo, TPC: tpc,
   }
 }
 
@@ -234,6 +226,11 @@ const E_FACTOR = {
 }
 const ET_OFFSET_FACTOR = 0.08
 const CR_TARGETS = { roadrace: 13.5, motocross: 12.5, enduro: 12.0, trail: 11.0 }
+const EXHAUST_DUR_TARGET = {
+  6500: 185, 7000: 188, 7500: 190, 8000: 192, 8500: 194, 9000: 196,
+  9500: 198, 10000: 200, 10500: 200, 11000: 200, 11500: 202, 12000: 204,
+  13000: 206, 14000: 208,
+}
 const PORT_DIAMETER = {
   50:  { min: 22, max: 26, typical: 24 },
   80:  { min: 30, max: 32, typical: 31 },
@@ -249,25 +246,42 @@ function getRecommendations(cc, engineType = 'roadrace') {
   const nearest = keys.reduce((prev, curr) =>
     Math.abs(curr - cc) < Math.abs(prev - cc) ? curr : prev)
   const preset = ENGINE_PRESETS[nearest]
+  const R = preset.stroke / 2
+  const rod = preset.rod
+  const C = 0
+
   const cr_target = CR_TARGETS[engineType] ?? 12.5
   const vd = Math.PI / 4 * preset.bore * preset.bore * preset.stroke / 1000
   const vc_recommended = vd / (cr_target - 1)
-  const rpmKeys = Object.keys(E_FACTOR).map(Number).sort((a, b) => a - b)
+
+  const rpmKeys = Object.keys(EXHAUST_DUR_TARGET).map(Number).sort((a, b) => a - b)
   const nearestRpm = rpmKeys.reduce((prev, curr) =>
     Math.abs(curr - preset.rpm) < Math.abs(prev - preset.rpm) ? curr : prev)
-  const E_recommended = preset.stroke * E_FACTOR[nearestRpm]
-  const Et_recommended = E_recommended + preset.stroke * ET_OFFSET_FACTOR
+  const dur_ex_target = EXHAUST_DUR_TARGET[nearestRpm]
+  const dur_tr_target = dur_ex_target - 28
+
+  // E_bell = R × cos((180 - dur/2) × π/180)
+  const E_bell  = R * Math.cos((180 - dur_ex_target / 2) * Math.PI / 180)
+  const Et_bell = R * Math.cos((180 - dur_tr_target / 2) * Math.PI / 180)
+
+  // Convert to E_from_top (user-input convention: distance from barrel top reference)
+  const E_from_top  = R + rod + C - E_bell
+  const Et_from_top = R + rod + C - Et_bell
+
   const portKeys = Object.keys(PORT_DIAMETER).map(Number).sort((a, b) => a - b)
   const nearestPort = portKeys.reduce((prev, curr) =>
     Math.abs(curr - cc) < Math.abs(prev - cc) ? curr : prev)
   const dport = PORT_DIAMETER[nearestPort].typical
+
   return {
     bore: preset.bore, stroke: preset.stroke, rod: preset.rod,
     rpm: preset.rpm, octane: preset.octane,
-    E: parseFloat(E_recommended.toFixed(1)),
-    Et: parseFloat(Et_recommended.toFixed(1)),
+    E: parseFloat(E_from_top.toFixed(1)),
+    Et: parseFloat(Et_from_top.toFixed(1)),
     C: 0, vc: parseFloat(vc_recommended.toFixed(1)),
     dport, label: preset.label, cr_target, nearestPreset: nearest,
+    dur_ex_target, dur_tr_target,
+    E_bell: parseFloat(E_bell.toFixed(2)), Et_bell: parseFloat(Et_bell.toFixed(2)),
   }
 }
 
@@ -894,9 +908,11 @@ function AutoRecommendPanel({ rec, onApply }) {
         <div style={{ background: '#fff', borderRadius: 8, padding: '10px 12px', border: '1px solid #bbf7d0' }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: '#15803d', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>② Port Timing</div>
           <div style={{ fontSize: 12, lineHeight: 1.9, color: '#374151' }}>
-            <div>E (exhaust): <strong>{rec.E} mm</strong></div>
-            <div>Et (transfer): <strong>{rec.Et} mm</strong></div>
+            <div>E (from_top): <strong>{rec.E} mm</strong></div>
+            <div>Et (from_top): <strong>{rec.Et} mm</strong></div>
             <div>C (clearance): <strong>{rec.C} mm</strong></div>
+            <div>Target exhaust dur: <strong>{rec.dur_ex_target}°</strong></div>
+            <div>Blowdown: <strong>{rec.dur_ex_target - rec.dur_tr_target}°</strong></div>
             <div>Port ⌀: <strong>{rec.dport} mm</strong></div>
           </div>
         </div>
@@ -917,7 +933,7 @@ function AutoRecommendPanel({ rec, onApply }) {
 function PortTab({ onMasterUpdate, onDone }) {
   const [form, setForm] = useState({
     bore: '54', stroke: '54', conrod: '105',
-    E: '17.5', C: '0', Et: '25', Vc: '8.5',
+    E: '127.3', C: '0', Et: '133.9', Vc: '8.5',
     rpm: '11000', octane: '92', cc: '125', engineType: 'roadrace',
   })
   const [result, setResult] = useState(null)
@@ -941,21 +957,29 @@ function PortTab({ onMasterUpdate, onDone }) {
 
   const calc = () => {
     const f = {
-      bore: p(form.bore), stroke: p(form.stroke), conrod: p(form.conrod),
-      E: p(form.E), C: p(form.C), Et: p(form.Et), Vc: p(form.Vc), rpm: p(form.rpm),
+      bore: p(form.bore), stroke: p(form.stroke), rod: p(form.conrod),
+      E_from_top: p(form.E), C: p(form.C), Et_from_top: p(form.Et),
+      vc: p(form.Vc), rpm: p(form.rpm),
     }
-    setFormSnap({ ...f, octane: p(form.octane) })
+    // formSnap keeps keys Viewer3D expects: conrod, E, Et
+    setFormSnap({
+      bore: f.bore, stroke: f.stroke, conrod: f.rod,
+      E: f.E_from_top, Et: f.Et_from_top, C: f.C,
+      Vc: f.vc, rpm: f.rpm, octane: p(form.octane),
+    })
     const res = calcPortData(f)
     setResult(res)
-    onMasterUpdate?.({
-      bore: f.bore, stroke: f.stroke, rod: f.conrod, E: f.E, C: f.C, Et: f.Et, vc: f.Vc, rpm: f.rpm,
-      octane: p(form.octane),
-      dur_ex: res.exDur, dur_tr: res.trDur, blowdown: res.blowdown,
-      cr: res.Cr, vd: res.Vd, piston_speed: res.Vp,
-      epo: res.EPO, epc: res.EPC, tpo: res.TPO, tpc: res.TPC,
-      calculatedAt: Date.now(),
-    })
-    onDone?.()
+    if (!res.error) {
+      onMasterUpdate?.({
+        bore: f.bore, stroke: f.stroke, rod: f.rod, vc: f.vc, rpm: f.rpm,
+        octane: p(form.octane),
+        dur_ex: res.dur_ex, dur_tr: res.dur_tr, blowdown: res.blowdown,
+        cr: res.cr, vd: res.vd, piston_speed: res.piston_speed,
+        epo: res.epo, epc: res.epc, tpo: res.tpo, tpc: res.tpc,
+        calculatedAt: Date.now(),
+      })
+      onDone?.()
+    }
   }
 
   return (
@@ -985,14 +1009,41 @@ function PortTab({ onMasterUpdate, onDone }) {
           <Field label="Con Rod (mm)" hint="Jarak center-to-center pena piston ke kruk as">
             <InputWithNotice value={form.conrod} onChange={set('conrod')} step={0.5} warn={220} danger={260} />
           </Field>
-          <Field label="E — exhaust port (mm)" hint="Tinggi port buang dari bibir atas barrel">
-            <InputWithNotice value={form.E} onChange={set('E')} step={0.5} warn={25} danger={35} />
+          <Field label="E — tinggi exhaust port dari bibir atas barrel (mm)" hint="Jarak dari tepi atas barrel ke puncak lubang exhaust port">
+            <NumInput value={form.E} onChange={set('E')} step={0.5} />
+            {p(form.conrod) > 0 && p(form.stroke) > 0 && (() => {
+              const R = p(form.stroke) / 2, rod = p(form.conrod), C = p(form.C)
+              const E_bell = R + rod + C - p(form.E)
+              const ratio = E_bell / R
+              const dur = Math.abs(ratio) <= 1
+                ? ((180 - Math.acos(ratio) * 180 / Math.PI) * 2).toFixed(1) + '°'
+                : '⚠ tidak valid'
+              return (
+                <div style={{ fontSize: 11, color: '#6b7280', marginTop: 3 }}>
+                  Valid: {(rod + C).toFixed(1)}–{(2 * R + rod + C).toFixed(1)}mm
+                  {' '}· Exhaust dur: <strong>{dur}</strong>
+                </div>
+              )
+            })()}
           </Field>
           <Field label="C — deck clearance (mm)" hint="Jarak piston ke bibir atas barrel saat TMA">
             <NumInput value={form.C} onChange={set('C')} step={0.1} />
           </Field>
-          <Field label="Et — transfer port (mm)" hint="Tinggi port transfer dari bibir atas barrel">
+          <Field label="Et — tinggi transfer port dari bibir atas barrel (mm)" hint="Harus lebih besar dari E — port transfer lebih dalam dari exhaust">
             <NumInput value={form.Et} onChange={set('Et')} step={0.5} />
+            {p(form.conrod) > 0 && p(form.stroke) > 0 && (() => {
+              const R = p(form.stroke) / 2, rod = p(form.conrod), C = p(form.C)
+              const Et_bell = R + rod + C - p(form.Et)
+              const ratio = Et_bell / R
+              const dur = Math.abs(ratio) <= 1
+                ? ((180 - Math.acos(ratio) * 180 / Math.PI) * 2).toFixed(1) + '°'
+                : '⚠ tidak valid'
+              return (
+                <div style={{ fontSize: 11, color: '#6b7280', marginTop: 3 }}>
+                  Transfer dur: <strong>{dur}</strong>
+                </div>
+              )
+            })()}
           </Field>
           <Field label="Vc clearance volume (cc)" hint="Volume ruang bakar saat piston di TMA">
             <NumInput value={form.Vc} onChange={set('Vc')} step={0.1} />
@@ -1018,36 +1069,49 @@ function PortTab({ onMasterUpdate, onDone }) {
       </Card>
 
       {result && (() => {
-        const { exDur, exDurValid, trDur, trDurValid, blowdown, blowdownStatus,
-          Vd, Cr, crStatus, Vp, vpStatus, EPO, EPC, TPO, TPC } = result
+        // FIX 5 — informative error message
+        if (result.error) return (
+          <div style={{ padding: '12px 16px', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 8, marginTop: 12 }}>
+            <div style={{ fontWeight: 600, color: '#b91c1c', marginBottom: 4 }}>⚠ Parameter tidak valid</div>
+            <div style={{ fontSize: 12, color: '#7f1d1d', lineHeight: 1.7 }}>{result.error}</div>
+            <div style={{ fontSize: 12, color: '#991b1b', marginTop: 8, padding: '6px 10px', background: '#fef2f2', borderRadius: 6 }}>
+              💡 Gunakan "Terapkan Semua" di panel rekomendasi, atau periksa nilai E dan Et — pastikan antara{' '}
+              {(p(form.stroke) / 2 + p(form.conrod) + p(form.C) - p(form.stroke) / 2).toFixed(1)}–{(p(form.stroke) / 2 + p(form.conrod) + p(form.C) + p(form.stroke) / 2).toFixed(1)} mm
+            </div>
+          </div>
+        )
+
+        const { dur_ex, dur_tr, blowdown, blowdownStatus, vd, cr, piston_speed, epo, epc, tpo, tpc } = result
+        const octaneNum = p(form.octane)
+
+        // FIX 4 — accurate CR status based on CR + octane
+        const crInfo = cr === null ? null
+          : cr < 12 ? null
+          : cr < 13 ? { type: 'info', text: `CR ${fmt(cr, 1)} — normal road race` }
+          : cr < 14 && octaneNum >= 92 ? { type: 'warn', text: `CR ${fmt(cr, 1)} — pastikan oktan ≥92` }
+          : cr < 14 ? { type: 'danger', text: `CR ${fmt(cr, 1)} — oktan ${octaneNum} terlalu rendah, risiko detonasi` }
+          : { type: 'danger', text: `CR ${fmt(cr, 1)} — di atas batas aman, risiko kerusakan` }
+
+        // FIX 4 — piston speed: INFO 15-18, WARN 18-20, DANGER >20
+        const vpInfo = piston_speed < 15 ? null
+          : piston_speed < 18 ? { type: 'info', text: `${fmt(piston_speed, 1)} m/s — kecepatan tinggi` }
+          : piston_speed < 20 ? { type: 'warn', text: `${fmt(piston_speed, 1)} m/s — mendekati batas` }
+          : { type: 'danger', text: `${fmt(piston_speed, 1)} m/s — melewati batas aman` }
 
         const blowLabel = blowdownStatus === 'ok' ? 'OK' : blowdownStatus === 'warn' ? 'WARN' : 'DANGER'
-        const crLabel = crStatus === 'ok' ? 'OK' : crStatus === 'warn' ? 'WARN — stress tinggi' : 'DANGER — detonasi'
-        const vpLabel = vpStatus === 'ok' ? 'OK' : vpStatus === 'warn' ? 'WARN' : 'DANGER — stress kritis'
-
-        // bar chart 360° cycle
-        const exAngle = exDur ?? 0
-        const trAngle = trDur ?? 0
-        const compAngle = 360 - exAngle
         const barSegs = [
-          { label: 'Kompresi', angle: compAngle, color: '#3b82f6' },
-          { label: 'Exhaust', angle: exAngle, color: '#ef4444' },
-          { label: 'Transfer', angle: trAngle, color: '#22c55e' },
+          { label: 'Kompresi', angle: 360 - dur_ex, color: '#3b82f6' },
+          { label: 'Exhaust', angle: dur_ex, color: '#ef4444' },
+          { label: 'Transfer', angle: dur_tr, color: '#22c55e' },
         ]
 
         return (
           <>
-            {(!exDurValid || !trDurValid) && (
-              <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 10, padding: '10px 14px', marginBottom: 12, color: S.danger, fontSize: 13, fontWeight: 600 }}>
-                ⚠ Nilai tidak valid — cek input dimensi (T/R di luar range ±1)
-              </div>
-            )}
-
             <Card title="Timing Port">
               <MetricGrid>
-                <Metric label="Exhaust Duration" value={exDurValid ? fmt(exDur) : '—'} unit="°" />
-                <Metric label="Transfer Duration" value={trDurValid ? fmt(trDur) : '—'} unit="°" />
-                <Metric label="Blowdown" value={blowdown !== null ? fmt(blowdown) : '—'} unit="°" status={blowdownStatus} />
+                <Metric label="Exhaust Duration" value={fmt(dur_ex)} unit="°" />
+                <Metric label="Transfer Duration" value={fmt(dur_tr)} unit="°" />
+                <Metric label="Blowdown" value={fmt(blowdown)} unit="°" status={blowdownStatus} />
               </MetricGrid>
               <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, color: '#6b7280' }}>Blowdown:</span>
@@ -1069,20 +1133,19 @@ function PortTab({ onMasterUpdate, onDone }) {
                   </thead>
                   <tbody>
                     {[
-                      ['EPO — Exhaust Port Open', EPO],
-                      ['EPC — Exhaust Port Close', EPC],
-                      ['TPO — Transfer Port Open', TPO],
-                      ['TPC — Transfer Port Close', TPC],
+                      ['EPO — Exhaust Port Open', epo],
+                      ['EPC — Exhaust Port Close', epc],
+                      ['TPO — Transfer Port Open', tpo],
+                      ['TPC — Transfer Port Close', tpc],
                     ].map(([label, val]) => (
                       <tr key={label} style={{ borderBottom: '1px solid #f3f4f6' }}>
                         <td style={{ padding: '7px 10px', fontWeight: 500 }}>{label}</td>
-                        <td style={{ padding: '7px 10px', fontFamily: 'monospace' }}>{val !== null ? fmt(val) + '°' : '—'}</td>
+                        <td style={{ padding: '7px 10px', fontFamily: 'monospace' }}>{fmt(val)}°</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-
               <div style={{ marginTop: 14 }}>
                 <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>Distribusi siklus 360°</div>
                 <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', height: 22 }}>
@@ -1105,19 +1168,16 @@ function PortTab({ onMasterUpdate, onDone }) {
 
             <Card title="Mekanis Mesin">
               <MetricGrid>
-                <Metric label="Displacement" value={fmt(Vd, 2)} unit="cc" />
-                <Metric label="Compression Ratio" value={Cr !== null ? fmt(Cr, 2) : '—'} unit=":1" status={crStatus} />
-                <Metric label="Mean Piston Speed" value={fmt(Vp, 2)} unit="m/s" status={vpStatus} />
+                <Metric label="Displacement" value={fmt(vd, 2)} unit="cc" />
+                <Metric label="Compression Ratio" value={cr !== null ? fmt(cr, 2) : '—'} unit=":1"
+                  status={crInfo ? crInfo.type : undefined} />
+                <Metric label="Mean Piston Speed" value={fmt(piston_speed, 2)} unit="m/s"
+                  status={vpInfo ? vpInfo.type : undefined} />
               </MetricGrid>
               <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <Badge text={crLabel} type={crStatus} />
-                <Badge text={vpLabel} type={vpStatus} />
+                {crInfo && <Badge text={crInfo.text} type={crInfo.type} />}
+                {vpInfo && <Badge text={vpInfo.text} type={vpInfo.type} />}
               </div>
-              {Cr !== null && Cr > 13 && (
-                <div style={{ marginTop: 8, fontSize: 12, color: S.warn }}>
-                  ⚠ Perhatikan TMA/TMB stress pada Cr &gt; 13:1
-                </div>
-              )}
             </Card>
 
             <div style={{ marginTop: 16 }}>
