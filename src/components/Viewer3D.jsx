@@ -560,165 +560,326 @@ export function ExhaustViewer({ data, dims: externalDims, onDimChange }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODUL 2 — PORT & PISTON VIEWER
+// MODUL 2 — PORT & PISTON VIEWER (rebuilt)
 // ══════════════════════════════════════════════════════════════════════════════
 
-function PortScene({ form, data, playing, speed, crossSection }) {
-  const angleRef = useRef(0)
+function PhaseIndicator({ angle }) {
+  const deg = ((angle * 180 / Math.PI) % 360 + 360) % 360
+  const phase = deg < 90  ? 'Kompresi'
+    : deg < 180 ? 'Pembakaran / Power'
+    : deg < 270 ? 'Exhaust'
+    : 'Transfer / Scavenging'
+  const color = deg < 90  ? '#1d4ed8'
+    : deg < 180 ? '#dc2626'
+    : deg < 270 ? '#d97706'
+    : '#15803d'
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:8,
+      padding:'6px 14px', borderRadius:8, marginTop:6,
+      background:'#f9fafb', border:'1px solid #e5e7eb' }}>
+      <div style={{ width:10, height:10, borderRadius:'50%', background:color, flexShrink:0 }} />
+      <span style={{ fontSize:12, fontWeight:500, color }}>Fase: {phase}</span>
+      <span style={{ fontSize:11, color:'#9ca3af', marginLeft:'auto' }}>
+        {deg.toFixed(0)}° kruk as
+      </span>
+    </div>
+  )
+}
+
+function EngineAssembly({ data, form, isPlaying, speed, showCross, onAngleUpdate }) {
+  const angleRef   = useRef(0)
+  const crankRef   = useRef()
   const pistonRef  = useRef()
-  const conrodRef  = useRef()
+  const rodRef     = useRef()
   const exPortRef  = useRef()
-  const trPortRef  = useRef()
-  const trPortRef2 = useRef()
+  const trPort1Ref = useRef()
+  const trPort2Ref = useRef()
+  const headGlowRef = useRef()
+  const sparkRef   = useRef()
 
-  const { bore, stroke, conrod, E, Et } = form
+  const bore   = form?.bore   || 54
+  const stroke = form?.stroke || 54
+  const rod    = form?.rod    || 105
 
-  // scale so barrel height ~ 4 units
-  const SCALE   = 4 / (stroke * 1.4)
-  const boreR   = (bore / 2) * SCALE
-  const wallT   = 9 * SCALE
-  const barrelH = stroke * 1.2 * SCALE
-  const pistonH = bore * 0.5 * SCALE
-  const rodLen  = conrod * SCALE
-  const halfS   = (stroke / 2) * SCALE
+  const sc = 2.0 / bore          // bore = 2.0 visual units
+  const R  = (stroke / 2) * sc   // crank radius
+  const L  = rod * sc            // con rod length
+  const B  = (bore / 2) * sc     // bore radius = 1.0
 
-  // port Y positions relative to barrel center (barrel bottom = -barrelH/2)
-  const exPortY = barrelH / 2 - E * SCALE
-  const trPortY = barrelH / 2 - Et * SCALE
+  // Bell E_bell values from calculated data
+  const E_vis  = (data?.E_bell  != null ? data.E_bell  : R / sc * 0.17) * sc
+  const Et_vis = (data?.Et_bell != null ? data.Et_bell : R / sc * (-0.07)) * sc
 
-  const clipPlane = useMemo(() =>
-    crossSection ? new THREE.Plane(new THREE.Vector3(0, 0, -1), 0.01) : null,
-  [crossSection])
-  const clipArr = clipPlane ? [clipPlane] : []
+  const crankCenterY = -(R + 0.5)
+  const pistonH      = B * 0.8
 
-  useFrame(() => {
-    if (!playing) return
-    angleRef.current += speed * 0.03
+  // Piston Y at TDC and BDC (crank at top/bottom, crankX≈0)
+  const pistonY_TDC = crankCenterY + R + L
+  const pistonY_BDC = crankCenterY - R + L
+  const barrelCenterY = (pistonY_TDC + pistonY_BDC) / 2   // = crankCenterY + L
+  const barrelH = 2 * R + pistonH + 0.9
+
+  // Port top Y in world space — derived from Bell kinematics:
+  // at port-open angle, crankPinY = crankCenterY + E_vis,
+  // pistonY ≈ crankCenterY + E_vis + sqrt(L²-R²+E_vis²)
+  const exPortY = crankCenterY + E_vis  + Math.sqrt(Math.max(0.01, L*L - R*R + E_vis*E_vis))
+  const trPortY = crankCenterY + Et_vis + Math.sqrt(Math.max(0.01, L*L - R*R + Et_vis*Et_vis))
+
+  const clipPlane = useMemo(
+    () => new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0.05), [])
+  const clip = showCross ? [clipPlane] : []
+
+  const headY = pistonY_TDC + pistonH / 2 + 0.25
+
+  useFrame((_, delta) => {
+    if (!isPlaying) return
+    angleRef.current += delta * speed * 6
+    onAngleUpdate(angleRef.current)
+
+    if (crankRef.current) crankRef.current.rotation.z = angleRef.current
 
     const a = angleRef.current
-    // piston Y from crank center (0,0): sin gives BDC at bottom, TDC at top
-    const pistonY = halfS * Math.sin(a)
-    const crankY  = 0  // crank center at world Y=0 (inside crankcase)
-    const pistonWorldY = crankY + pistonY + rodLen * 0.5
+    const crankPinX = R * Math.sin(a)
+    const crankPinY = crankCenterY + R * Math.cos(a)
+    const pistonY   = crankPinY + Math.sqrt(Math.max(0.01, L*L - crankPinX*crankPinX))
 
-    if (pistonRef.current) {
-      pistonRef.current.position.y = pistonWorldY
+    if (pistonRef.current) pistonRef.current.position.y = pistonY
+
+    if (rodRef.current) {
+      rodRef.current.position.set(crankPinX / 2, (crankPinY + pistonY) / 2, 0)
+      rodRef.current.rotation.z = -Math.atan2(crankPinX, pistonY - crankPinY)
     }
 
-    if (conrodRef.current) {
-      const midY = (pistonWorldY - pistonH / 2 + crankY) / 2
-      const dx   = halfS * Math.cos(a) * 0.25
-      conrodRef.current.position.y = midY
-      conrodRef.current.position.x = dx * 0.3
-      const dy = pistonWorldY - pistonH / 2 - crankY
-      conrodRef.current.rotation.z = Math.atan2(dx * 0.3, dy)
-    }
-
-    // port glow: use angle mod 2π mapped to 0-360°
-    const deg = ((a % (Math.PI * 2)) / (Math.PI * 2)) * 360
-    const normDeg = ((deg % 360) + 360) % 360
-
-    const exDur = data.exDur ?? 180
-    const trDur = data.trDur ?? 160
-    const EPO = 180 - exDur / 2, EPC = 180 + exDur / 2
-    const TPO = 180 - trDur / 2, TPC = 180 + trDur / 2
-
-    const exOpen = normDeg >= EPO && normDeg <= EPC
-    const trOpen = normDeg >= TPO && normDeg <= TPC
+    // Port open/close from crank angle
+    const deg = ((a * 180 / Math.PI) % 360 + 360) % 360
+    const epo = data?.epo ?? 80,  epc = data?.epc ?? 280
+    const tpo = data?.tpo ?? 94,  tpc = data?.tpc ?? 266
+    const exOpen = deg >= epo && deg <= epc
+    const trOpen = deg >= tpo && deg <= tpc
 
     if (exPortRef.current?.material) {
-      exPortRef.current.material.emissiveIntensity = exOpen ? 0.7 : 0.08
+      exPortRef.current.material.emissiveIntensity = exOpen ? 0.95 : 0.15
+      exPortRef.current.material.color.set(exOpen ? '#ff4400' : '#cc2200')
     }
-    ;[trPortRef, trPortRef2].forEach(r => {
-      if (r.current?.material) r.current.material.emissiveIntensity = trOpen ? 0.7 : 0.05
+    ;[trPort1Ref, trPort2Ref].forEach(r => {
+      if (r.current?.material) {
+        r.current.material.emissiveIntensity = trOpen ? 0.85 : 0.12
+        r.current.material.color.set(trOpen ? '#2266ff' : '#1144cc')
+      }
     })
+
+    // Head combustion glow near TDC
+    const nearTDC = deg < 35 || deg > 325
+    if (headGlowRef.current?.material)
+      headGlowRef.current.material.emissiveIntensity = nearTDC ? 0.75 : 0.05
+    if (sparkRef.current?.material)
+      sparkRef.current.material.emissiveIntensity = (deg < 8 || deg > 352) ? 1.0 : 0.0
   })
 
   return (
-    <>
-      <Lights />
+    <group>
 
-      {/* crankcase box */}
-      <mesh position={[0, -barrelH / 2 - barrelH * 0.22, 0]} receiveShadow>
-        <boxGeometry args={[boreR * 3.6, barrelH * 0.42, boreR * 3.0]} />
-        <meshStandardMaterial color="#8a8a8a" metalness={0.6} roughness={0.4} clippingPlanes={clipArr} />
-      </mesh>
-
-      {/* barrel outer */}
-      <mesh castShadow receiveShadow>
-        <cylinderGeometry args={[boreR + wallT, boreR + wallT, barrelH, 48]} />
-        <meshStandardMaterial color="#c0c0c0" metalness={0.55} roughness={0.35} clippingPlanes={clipArr} />
-      </mesh>
-
-      {/* bore inner — dark back-face so bore looks hollow */}
-      <mesh>
-        <cylinderGeometry args={[boreR, boreR, barrelH + 0.02, 48]} />
-        <meshStandardMaterial color="#1a1a1a" metalness={0.1} roughness={0.9} side={THREE.BackSide} clippingPlanes={clipArr} />
-      </mesh>
-
-      {/* exhaust port block */}
-      <mesh ref={exPortRef} position={[boreR + wallT * 0.6, exPortY - barrelH / 2 + barrelH / 2, 0]} castShadow>
-        <boxGeometry args={[wallT * 1.1, 11 * SCALE, boreR * 0.85]} />
-        <meshStandardMaterial color="#ff4444" emissive="#ff2200" emissiveIntensity={0.1} clippingPlanes={clipArr} />
-      </mesh>
-
-      {/* transfer port +Z */}
-      <mesh ref={trPortRef} position={[0, trPortY - barrelH / 2 + barrelH / 2, boreR + wallT * 0.6]}>
-        <boxGeometry args={[boreR * 0.75, 9 * SCALE, wallT * 1.1]} />
-        <meshStandardMaterial color="#3377ff" emissive="#1155ff" emissiveIntensity={0.05} clippingPlanes={clipArr} />
-      </mesh>
-
-      {/* transfer port -Z */}
-      <mesh ref={trPortRef2} position={[0, trPortY - barrelH / 2 + barrelH / 2, -(boreR + wallT * 0.6)]}>
-        <boxGeometry args={[boreR * 0.75, 9 * SCALE, wallT * 1.1]} />
-        <meshStandardMaterial color="#3377ff" emissive="#1155ff" emissiveIntensity={0.05} clippingPlanes={clipArr} />
-      </mesh>
-
-      {/* piston group */}
-      <group ref={pistonRef} position={[0, halfS, 0]}>
-        {/* piston body */}
-        <mesh castShadow>
-          <cylinderGeometry args={[boreR * 0.972, boreR * 0.972, pistonH, 32]} />
-          <meshStandardMaterial color="#e2e2e2" metalness={0.88} roughness={0.1} clippingPlanes={clipArr} />
+      {/* ── CRANKSHAFT (rotating group) ── */}
+      <group ref={crankRef} position={[0, crankCenterY, 0]}>
+        {/* main journal — axis along Z */}
+        <mesh rotation={[Math.PI/2, 0, 0]}>
+          <cylinderGeometry args={[0.15, 0.15, 0.5, 16]} />
+          <meshStandardMaterial color="#e0e0e0" metalness={1.0} roughness={0.05} clippingPlanes={clip} />
         </mesh>
-        {/* ring 1 */}
-        <mesh position={[0, pistonH * 0.22, 0]}>
-          <torusGeometry args={[boreR * 0.975, 0.016, 8, 32]} />
-          <meshStandardMaterial color="#777" metalness={0.95} roughness={0.08} clippingPlanes={clipArr} />
+        {/* two crank webs (flat discs in XY plane at Z=±0.18) */}
+        {[-0.18, 0.18].map((z, i) => (
+          <mesh key={i} position={[0, 0, z]} rotation={[Math.PI/2, 0, 0]}>
+            <cylinderGeometry args={[R*0.9, R*0.9, 0.08, 32]} />
+            <meshStandardMaterial color="#444" metalness={0.7} roughness={0.3} clippingPlanes={clip} />
+          </mesh>
+        ))}
+        {/* crank pin at local Y=R (orbits with group rotation) */}
+        <mesh position={[0, R, 0]} rotation={[Math.PI/2, 0, 0]}>
+          <cylinderGeometry args={[0.10, 0.10, 0.40, 16]} />
+          <meshStandardMaterial color="#e0e0e0" metalness={1.0} roughness={0.05} clippingPlanes={clip} />
         </mesh>
-        {/* ring 2 */}
-        <mesh position={[0, pistonH * 0.05, 0]}>
-          <torusGeometry args={[boreR * 0.975, 0.016, 8, 32]} />
-          <meshStandardMaterial color="#777" metalness={0.95} roughness={0.08} clippingPlanes={clipArr} />
-        </mesh>
-        {/* gudgeon pin */}
-        <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.028, 0.028, boreR * 1.7, 12]} />
-          <meshStandardMaterial color="#ddd" metalness={1} roughness={0.04} clippingPlanes={clipArr} />
+        {/* counterweight (opposite side of crank pin) */}
+        <mesh position={[0, -R*0.65, 0]}>
+          <boxGeometry args={[R*0.8, R*0.5, 0.16]} />
+          <meshStandardMaterial color="#333" metalness={0.6} roughness={0.4} clippingPlanes={clip} />
         </mesh>
       </group>
 
-      {/* con rod */}
-      <mesh ref={conrodRef} position={[0, 0, 0]} castShadow>
-        <cylinderGeometry args={[0.028, 0.028, rodLen, 8]} />
-        <meshStandardMaterial color="#aaa" metalness={0.8} roughness={0.25} clippingPlanes={clipArr} />
+      {/* ── CON ROD ── */}
+      <group ref={rodRef} position={[0, barrelCenterY, 0]}>
+        <mesh>
+          <cylinderGeometry args={[0.055, 0.055, L, 8]} />
+          <meshStandardMaterial color="#888" metalness={0.8} roughness={0.15} clippingPlanes={clip} />
+        </mesh>
+        {/* big end (bottom, connects to crank pin) */}
+        <mesh position={[0, -L/2, 0]} rotation={[Math.PI/2, 0, 0]}>
+          <torusGeometry args={[0.10, 0.04, 8, 24]} />
+          <meshStandardMaterial color="#999" metalness={0.8} roughness={0.2} clippingPlanes={clip} />
+        </mesh>
+        {/* small end (top, connects to piston pin) */}
+        <mesh position={[0, L/2, 0]} rotation={[Math.PI/2, 0, 0]}>
+          <torusGeometry args={[0.08, 0.035, 8, 24]} />
+          <meshStandardMaterial color="#999" metalness={0.8} roughness={0.2} clippingPlanes={clip} />
+        </mesh>
+      </group>
+
+      {/* ── PISTON ── */}
+      <group ref={pistonRef} position={[0, pistonY_TDC, 0]}>
+        {/* main body */}
+        <mesh>
+          <cylinderGeometry args={[B-0.05, B-0.05, pistonH, 32]} />
+          <meshStandardMaterial color="#d0d0d0" metalness={0.7} roughness={0.2} clippingPlanes={clip} />
+        </mesh>
+        {/* crown dome */}
+        <mesh position={[0, pistonH/2, 0]}>
+          <sphereGeometry args={[B-0.05, 32, 16, 0, Math.PI*2, 0, Math.PI/5]} />
+          <meshStandardMaterial color="#c8c8c8" metalness={0.8} roughness={0.15} clippingPlanes={clip} />
+        </mesh>
+        {/* three piston rings */}
+        {[-pistonH*0.05, -pistonH*0.18, -pistonH*0.31].map((y, i) => (
+          <mesh key={i} position={[0, y, 0]}>
+            <torusGeometry args={[B-0.04, 0.025, 8, 32]} />
+            <meshStandardMaterial color="#555" metalness={0.9} roughness={0.1} clippingPlanes={clip} />
+          </mesh>
+        ))}
+        {/* gudgeon pin */}
+        <mesh rotation={[Math.PI/2, 0, 0]}>
+          <cylinderGeometry args={[0.07, 0.07, B*1.3, 16]} />
+          <meshStandardMaterial color="#e0e0e0" metalness={1.0} roughness={0.05} clippingPlanes={clip} />
+        </mesh>
+        {/* skirt */}
+        <mesh position={[0, -pistonH*0.38, 0]}>
+          <cylinderGeometry args={[B-0.06, B-0.06, pistonH*0.45, 32]} />
+          <meshStandardMaterial color="#b8b8b8" metalness={0.6} roughness={0.3} clippingPlanes={clip} />
+        </mesh>
+      </group>
+
+      {/* ── CYLINDER BARREL ── */}
+      {/* outer wall */}
+      <mesh position={[0, barrelCenterY, 0]}>
+        <cylinderGeometry args={[B+0.25, B+0.25, barrelH, 32]} />
+        <meshStandardMaterial color="#909090" metalness={0.5} roughness={0.4} clippingPlanes={clip} />
+      </mesh>
+      {/* bore interior (BackSide = visible from inside) */}
+      <mesh position={[0, barrelCenterY, 0]}>
+        <cylinderGeometry args={[B, B, barrelH+0.1, 32]} />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.9} side={THREE.BackSide} clippingPlanes={clip} />
+      </mesh>
+      {/* 7 cooling fins evenly distributed */}
+      {Array.from({length: 7}, (_, i) => (
+        <mesh key={i} position={[0, barrelCenterY - barrelH/2 + barrelH * (i+0.5)/7, 0]}>
+          <torusGeometry args={[B+0.30, 0.04, 4, 32]} />
+          <meshStandardMaterial color="#a8a8a8" metalness={0.5} roughness={0.4} clippingPlanes={clip} />
+        </mesh>
+      ))}
+
+      {/* ── EXHAUST PORT (right side +X) ── */}
+      <mesh ref={exPortRef} position={[B+0.20, exPortY, 0]}>
+        <boxGeometry args={[0.32, 0.18, B*0.75]} />
+        <meshStandardMaterial color="#cc2200" emissive="#880000" emissiveIntensity={0.15}
+          clippingPlanes={clip} />
+      </mesh>
+      <Html position={[B+0.65, exPortY + 0.10, 0]}>
+        <div style={{ fontSize:10, color:'#ff6644', fontWeight:700, whiteSpace:'nowrap',
+          background:'rgba(0,0,0,0.72)', padding:'2px 6px', borderRadius:4, pointerEvents:'none' }}>
+          Exhaust Port
+        </div>
+      </Html>
+
+      {/* ── TRANSFER PORTS (front +Z and back -Z) ── */}
+      {[1, -1].map((side, i) => (
+        <mesh key={i} ref={i === 0 ? trPort1Ref : trPort2Ref}
+          position={[0, trPortY, side*(B+0.18)]}
+          rotation={[0, side * (-Math.PI/6), 0]}
+        >
+          <boxGeometry args={[B*0.55, 0.14, 0.30]} />
+          <meshStandardMaterial color="#1144cc" emissive="#001188" emissiveIntensity={0.12}
+            clippingPlanes={clip} />
+        </mesh>
+      ))}
+      <Html position={[B+0.65, trPortY + 0.10, 0]}>
+        <div style={{ fontSize:10, color:'#6699ff', fontWeight:700, whiteSpace:'nowrap',
+          background:'rgba(0,0,0,0.72)', padding:'2px 6px', borderRadius:4, pointerEvents:'none' }}>
+          Transfer Port
+        </div>
+      </Html>
+
+      {/* ── CRANKCASE ── */}
+      <mesh position={[0, crankCenterY - R*0.3, 0]}>
+        <cylinderGeometry args={[B+0.50, B+0.40, R*1.8, 32]} />
+        <meshStandardMaterial color="#707070" metalness={0.4} roughness={0.5} clippingPlanes={clip} />
+      </mesh>
+      {/* interior glow (BackSide so blue shows inside) */}
+      <mesh position={[0, crankCenterY - R*0.3, 0]}>
+        <cylinderGeometry args={[B+0.36, B+0.36, R*1.65, 32]} />
+        <meshStandardMaterial color="#001a4d" emissive="#002299" emissiveIntensity={0.18}
+          transparent opacity={0.65} side={THREE.BackSide} clippingPlanes={clip} />
+      </mesh>
+      <Html position={[0, crankCenterY - R*0.3, 0]}>
+        <div style={{ fontSize:10, color:'#4488ff', fontWeight:600, textAlign:'center',
+          background:'rgba(0,0,0,0.72)', padding:'2px 7px', borderRadius:4,
+          whiteSpace:'nowrap', pointerEvents:'none' }}>
+          CrankCase / Ruang Bilas
+        </div>
+      </Html>
+
+      {/* ── CYLINDER HEAD ── */}
+      {/* head body */}
+      <mesh position={[0, headY + 0.22, 0]}>
+        <cylinderGeometry args={[B+0.20, B+0.15, 0.42, 32]} />
+        <meshStandardMaterial color="#808080" metalness={0.6} roughness={0.3} clippingPlanes={clip} />
+      </mesh>
+      {/* combustion chamber dome */}
+      <mesh ref={headGlowRef} position={[0, headY, 0]}>
+        <sphereGeometry args={[B*0.58, 32, 16, 0, Math.PI*2, 0, Math.PI/2]} />
+        <meshStandardMaterial color="#cc4400" emissive="#882200" emissiveIntensity={0.05}
+          clippingPlanes={clip} />
+      </mesh>
+      {/* spark plug body */}
+      <mesh position={[0, headY + 0.44, 0]}>
+        <cylinderGeometry args={[0.05, 0.05, 0.30, 8]} />
+        <meshStandardMaterial color="#888" metalness={0.7} clippingPlanes={clip} />
+      </mesh>
+      {/* spark electrode (flashes at TDC) */}
+      <mesh ref={sparkRef} position={[0, headY + 0.25, 0]}>
+        <sphereGeometry args={[0.04, 8, 8]} />
+        <meshStandardMaterial color="#ffdd00" emissive="#ffaa00" emissiveIntensity={0.0} />
       </mesh>
 
-      {/* crank web (half-arc) */}
-      <mesh position={[0, -barrelH / 2 - halfS * 0.5, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[halfS * 0.75, 0.05, 8, 32, Math.PI]} />
-        <meshStandardMaterial color="#888" metalness={0.82} roughness={0.22} clippingPlanes={clipArr} />
+      {/* ── TMA / TMB REFERENCE LINES & LABELS ── */}
+      {/* TMA line */}
+      <mesh position={[0, pistonY_TDC, 0]} rotation={[0, 0, Math.PI/2]}>
+        <cylinderGeometry args={[0.007, 0.007, (B+0.38)*2, 4]} />
+        <meshStandardMaterial color="#22cc22" transparent opacity={0.55} />
       </mesh>
+      <Html position={[B+0.52, pistonY_TDC, 0]}>
+        <div style={{ fontSize:11, color:'#22cc22', fontWeight:700, whiteSpace:'nowrap',
+          background:'rgba(0,0,0,0.65)', padding:'2px 6px', borderRadius:4, pointerEvents:'none' }}>
+          ← TMA
+        </div>
+      </Html>
 
-      <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
-    </>
+      {/* TMB line */}
+      <mesh position={[0, pistonY_BDC, 0]} rotation={[0, 0, Math.PI/2]}>
+        <cylinderGeometry args={[0.007, 0.007, (B+0.38)*2, 4]} />
+        <meshStandardMaterial color="#ffaa00" transparent opacity={0.55} />
+      </mesh>
+      <Html position={[B+0.52, pistonY_BDC, 0]}>
+        <div style={{ fontSize:11, color:'#ffaa00', fontWeight:700, whiteSpace:'nowrap',
+          background:'rgba(0,0,0,0.65)', padding:'2px 6px', borderRadius:4, pointerEvents:'none' }}>
+          ← TMB
+        </div>
+      </Html>
+
+    </group>
   )
 }
 
 export function PortViewer({ data, form }) {
-  const [playing, setPlaying]     = useState(true)
-  const [speed, setSpeed]         = useState(1)
-  const [crossSection, setCross]  = useState(false)
+  const [isPlaying, setIsPlaying] = useState(true)
+  const [speed, setSpeed]         = useState(1.0)
+  const [showCross, setShowCross] = useState(true)
+  const [currentAngle, setCurrentAngle] = useState(0)
   const [resetKey, setResetKey]   = useState(0)
 
   if (!form) return null
@@ -726,25 +887,66 @@ export function PortViewer({ data, form }) {
   return (
     <div>
       <ControlBar>
-        <Btn onClick={() => setResetKey(k => k + 1)}>🔄 Reset View</Btn>
-        <Btn active={playing} onClick={() => setPlaying(v => !v)}>
-          {playing ? '⏸ Pause' : '▶ Play'}
+        <Btn onClick={() => setResetKey(k => k+1)}>🔄 Reset View</Btn>
+        <Btn active={isPlaying} onClick={() => setIsPlaying(v => !v)}>
+          {isPlaying ? '⏸ Pause' : '▶ Play'}
         </Btn>
-        <SliderCtrl label="⚡ Speed:" value={speed} min={0.5} max={3} step={0.1} onChange={setSpeed} />
-        <Btn active={crossSection} onClick={() => setCross(v => !v)}>
-          🔍 Cross-Section: {crossSection ? 'ON' : 'OFF'}
+        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <span style={{ fontSize:11, color:'#6b7280' }}>Speed:</span>
+          <input type="range" min={0.2} max={3} step={0.1} value={speed}
+            onChange={e => setSpeed(parseFloat(e.target.value))}
+            style={{ width:80, accentColor:'#c75e1a' }} />
+          <span style={{ fontSize:11, color:'#6b7280' }}>{speed.toFixed(1)}×</span>
+        </div>
+        <Btn active={showCross} onClick={() => setShowCross(v => !v)}>
+          ✂️ Cross-Section: {showCross ? 'ON' : 'OFF'}
         </Btn>
       </ControlBar>
-      <CanvasWrap>
-        <CameraResetter trigger={resetKey} />
-        <PortScene
-          form={form}
-          data={data}
-          playing={playing}
-          speed={speed}
-          crossSection={crossSection}
-        />
-      </CanvasWrap>
+
+      <div style={{ borderRadius:12, overflow:'hidden', height:460, background:'#e8e8f0' }}>
+        <Canvas
+          camera={{ position:[3.5, 1.0, 6.5], fov:45 }}
+          gl={{ localClippingEnabled: true }}
+          shadows
+        >
+          <CameraResetter trigger={resetKey} />
+          <ambientLight intensity={0.5} />
+          <directionalLight position={[3, 5, 3]} intensity={1.2} castShadow />
+          <directionalLight position={[-3, 3, -3]} intensity={0.5} />
+          <pointLight position={[0, 3, 0]} intensity={0.4} color="#fff5e0" />
+
+          <EngineAssembly
+            data={data}
+            form={form}
+            isPlaying={isPlaying}
+            speed={speed}
+            showCross={showCross}
+            onAngleUpdate={setCurrentAngle}
+          />
+
+          <OrbitControls enableDamping dampingFactor={0.08} minDistance={2} maxDistance={14} />
+          <gridHelper args={[8, 16, '#cccccc', '#e5e5e5']} position={[0, -3.2, 0]} />
+        </Canvas>
+      </div>
+
+      <PhaseIndicator angle={currentAngle} />
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginTop:8 }}>
+        {[
+          { label:'EPO', value: data?.epo, color:'#dc2626' },
+          { label:'EPC', value: data?.epc, color:'#dc2626' },
+          { label:'TPO', value: data?.tpo, color:'#1d4ed8' },
+          { label:'TPC', value: data?.tpc, color:'#1d4ed8' },
+        ].map(item => (
+          <div key={item.label} style={{ background:'#f9fafb', borderRadius:6,
+            padding:'6px 10px', borderLeft:`3px solid ${item.color}` }}>
+            <div style={{ fontSize:10, color:'#9ca3af' }}>{item.label}</div>
+            <div style={{ fontSize:14, fontWeight:600, color:item.color }}>
+              {item.value != null ? item.value.toFixed(1) + '°' : '—'}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
