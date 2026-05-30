@@ -1,0 +1,4 @@
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: #f3f4f6; }
+#root { width: 100%; }
+input:focus, select:focus { outline: 2px solid #c75e1a; outline-offset: 1px; }
