@@ -206,6 +206,38 @@ function NumInput({ value, onChange, step = 1, min, max }) {
   )
 }
 
+function InputWithNotice({ value, onChange, step, min, max, warn, danger }) {
+  const num = parseFloat(value) || 0
+  const isDanger = danger != null && num >= danger
+  const isWarn   = !isDanger && warn != null && num >= warn
+  const borderColor = isDanger ? '#b91c1c' : isWarn ? '#b45309' : '#d1d5db'
+  const notice = isDanger
+    ? `⚠ Melebihi batas aman (max ${danger})`
+    : isWarn
+    ? `Mendekati batas maksimal (${warn})`
+    : null
+  return (
+    <div>
+      <input
+        type="number" value={value} step={step} min={min} max={max}
+        onChange={e => onChange(e.target.value)}
+        style={{
+          width: '100%', padding: '7px 10px', boxSizing: 'border-box',
+          border: `1px solid ${borderColor}`,
+          borderRadius: 8, fontSize: 14, fontFamily: 'system-ui', outline: 'none',
+          background: isDanger ? '#fff1f1' : isWarn ? '#fffbeb' : '#fff',
+          color: '#111',
+        }}
+      />
+      {notice && (
+        <div style={{ fontSize: 11, marginTop: 3, color: isDanger ? '#b91c1c' : '#b45309' }}>
+          {notice}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Select({ value, onChange, options }) {
   return (
     <select
@@ -303,18 +335,26 @@ function ExhaustTab() {
     <div>
       <Card title="Parameter Input" accent>
         <Grid cols={2}>
-          <Field label="RPM Target"><NumInput value={rpm} onChange={setRpm} step={100} /></Field>
-          <Field label="Displacement (cc)"><NumInput value={cc} onChange={setCc} step={5} /></Field>
-          <Field label="Exhaust Duration (°)"><NumInput value={exDur} onChange={setExDur} step={0.5} /></Field>
-          <Field label="Diameter Port (mm)"><NumInput value={dPort} onChange={setDPort} step={0.5} /></Field>
-          <Field label="Tipe Mesin">
+          <Field label="RPM Target" hint="Puncak RPM yang ingin dicapai mesin">
+            <InputWithNotice value={rpm} onChange={setRpm} step={100} warn={14000} danger={16000} />
+          </Field>
+          <Field label="Displacement (cc)" hint="Volume silinder kerja mesin">
+            <InputWithNotice value={cc} onChange={setCc} step={5} warn={450} danger={550} />
+          </Field>
+          <Field label="Exhaust Duration (°)" hint="Lama port buang terbuka dalam satu siklus">
+            <InputWithNotice value={exDur} onChange={setExDur} step={0.5} warn={210} danger={220} />
+          </Field>
+          <Field label="Diameter Port (mm)" hint="Diameter dalam lubang buang di silinder">
+            <InputWithNotice value={dPort} onChange={setDPort} step={0.5} warn={55} danger={65} />
+          </Field>
+          <Field label="Tipe Mesin" hint="Karakter penggunaan mesin — menentukan sudut diffuser dan baffle">
             <Select value={type} onChange={setType} options={[
               { value: 'roadrace', label: 'Road Race' },
               { value: 'motocross', label: 'Motocross' },
               { value: 'enduro', label: 'Enduro' },
             ]} />
           </Field>
-          <Field label="Tahap Diffuser">
+          <Field label="Tahap Diffuser" hint="Makin banyak tahap, power band makin lebar dan halus">
             <Select value={diffStages} onChange={setDiffStages} options={[
               { value: '1', label: '1 tahap' },
               { value: '2', label: '2 tahap' },
@@ -322,8 +362,8 @@ function ExhaustTab() {
             ]} />
           </Field>
         </Grid>
-        <Field label="Speed of Sound (m/s)" hint="default 345 m/s @ 20°C">
-          <NumInput value={sos} onChange={setSos} step={1} />
+        <Field label="Speed of Sound (m/s)" hint="Kecepatan rambat gelombang tekanan — naik seiring suhu gas, default 345 m/s @ 20°C">
+          <InputWithNotice value={sos} onChange={setSos} step={1} warn={400} danger={450} />
         </Field>
         <CalcBtn onClick={calc} />
       </Card>
@@ -432,24 +472,30 @@ function PortTab() {
     <div>
       <Card title="Parameter Input" accent>
         <Grid cols={2}>
-          <Field label="Bore (mm)"><NumInput value={bore} onChange={setBore} step={0.5} /></Field>
-          <Field label="Stroke (mm)"><NumInput value={stroke} onChange={setStroke} step={0.5} /></Field>
-          <Field label="Panjang Con Rod (mm)" hint="biasanya 1.8–2× stroke">
-            <NumInput value={conrod} onChange={setConrod} step={0.5} />
+          <Field label="Bore (mm)" hint="Diameter dalam silinder">
+            <InputWithNotice value={bore} onChange={setBore} step={0.5} warn={90} danger={105} />
           </Field>
-          <Field label="E — exhaust port ke atas barrel (mm)">
-            <NumInput value={E} onChange={setE} step={0.5} />
+          <Field label="Stroke (mm)" hint="Jarak tempuh piston dari TMA ke TMB">
+            <InputWithNotice value={stroke} onChange={setStroke} step={0.5} warn={90} danger={105} />
           </Field>
-          <Field label="C — deck clearance TDC (mm)" hint="0 jika flush">
+          <Field label="Panjang Con Rod (mm)" hint="Jarak center-to-center pena piston ke pena kruk as — biasanya 1.8–2× stroke">
+            <InputWithNotice value={conrod} onChange={setConrod} step={0.5} warn={220} danger={260} />
+          </Field>
+          <Field label="E — exhaust port ke atas barrel (mm)" hint="Menentukan kapan port buang mulai terbuka">
+            <InputWithNotice value={E} onChange={setE} step={0.5} warn={25} danger={35} />
+          </Field>
+          <Field label="C — deck clearance TDC (mm)" hint="Jarak piston ke bibir atas barrel saat di TMA — 0 jika flush">
             <NumInput value={C} onChange={setC} step={0.1} />
           </Field>
-          <Field label="Et — transfer port ke atas barrel (mm)">
+          <Field label="Et — transfer port ke atas barrel (mm)" hint="Menentukan kapan port transfer mulai terbuka">
             <NumInput value={Et} onChange={setEt} step={0.5} />
           </Field>
-          <Field label="Volume Clearance Vc (cc)">
+          <Field label="Volume Clearance Vc (cc)" hint="Volume ruang bakar saat piston di TMA">
             <NumInput value={Vc} onChange={setVc} step={0.1} />
           </Field>
-          <Field label="Target RPM"><NumInput value={rpm} onChange={setRpm} step={100} /></Field>
+          <Field label="Target RPM" hint="RPM acuan untuk analisis piston speed">
+            <NumInput value={rpm} onChange={setRpm} step={100} />
+          </Field>
         </Grid>
         <CalcBtn onClick={calc} />
       </Card>
@@ -606,20 +652,38 @@ function ECUTab() {
     <div>
       <Card title="Sensor Real-Time" accent>
         <Grid cols={2}>
-          <Field label="RPM Saat Ini"><NumInput value={rpmCurrent} onChange={setRpmCurrent} step={100} /></Field>
-          <Field label="TPS (%)" hint="0–100"><NumInput value={tps} onChange={setTps} step={1} min={0} max={100} /></Field>
-          <Field label="MAP (kPa)"><NumInput value={map} onChange={setMap} step={1} /></Field>
-          <Field label="Suhu Mesin (°C)"><NumInput value={temp} onChange={setTemp} step={1} /></Field>
-          <Field label="Lambda λ"><NumInput value={lambda} onChange={setLambda} step={0.01} /></Field>
-          <Field label="Oktan Bahan Bakar"><NumInput value={oktan} onChange={setOktan} step={1} /></Field>
+          <Field label="RPM Saat Ini" hint="Putaran mesin aktual yang sedang dioperasikan">
+            <NumInput value={rpmCurrent} onChange={setRpmCurrent} step={100} />
+          </Field>
+          <Field label="TPS (%)" hint="Posisi bukaan gas — 0 tutup penuh, 100 buka penuh">
+            <NumInput value={tps} onChange={setTps} step={1} min={0} max={100} />
+          </Field>
+          <Field label="MAP (kPa)" hint="Tekanan udara di intake manifold — indikator beban mesin">
+            <NumInput value={map} onChange={setMap} step={1} />
+          </Field>
+          <Field label="Suhu Mesin (°C)" hint="Suhu operasi — mempengaruhi timing dan risiko detonasi">
+            <InputWithNotice value={temp} onChange={setTemp} step={1} warn={90} danger={105} />
+          </Field>
+          <Field label="Lambda λ" hint="Rasio campuran udara-bahan bakar — 1.0 = stoikiometri ideal">
+            <InputWithNotice value={lambda} onChange={setLambda} step={0.01} warn={1.10} danger={1.20} />
+          </Field>
+          <Field label="Oktan Bahan Bakar" hint="Ketahanan bahan bakar terhadap detonasi — makin tinggi makin tahan">
+            <NumInput value={oktan} onChange={setOktan} step={1} />
+          </Field>
         </Grid>
       </Card>
 
       <Card title="Parameter Mesin">
         <Grid cols={3}>
-          <Field label="RPM Power Peak"><NumInput value={rpmPeak} onChange={setRpmPeak} step={100} /></Field>
-          <Field label="Exhaust Duration (°)"><NumInput value={exDur} onChange={setExDur} step={0.5} /></Field>
-          <Field label="Compression Ratio"><NumInput value={cr} onChange={setCr} step={0.1} /></Field>
+          <Field label="RPM Power Peak" hint="Sesuaikan dengan hasil kalkulasi modul Knalpot">
+            <NumInput value={rpmPeak} onChange={setRpmPeak} step={100} />
+          </Field>
+          <Field label="Exhaust Duration (°)" hint="Sesuaikan dengan hasil kalkulasi modul Port &amp; Stroke">
+            <NumInput value={exDur} onChange={setExDur} step={0.5} />
+          </Field>
+          <Field label="Compression Ratio" hint="Sesuaikan dengan hasil kalkulasi modul Port &amp; Stroke">
+            <NumInput value={cr} onChange={setCr} step={0.1} />
+          </Field>
         </Grid>
         <CalcBtn onClick={calc} />
       </Card>

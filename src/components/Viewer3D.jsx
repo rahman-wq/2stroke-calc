@@ -83,6 +83,31 @@ function CameraResetter({ trigger }) {
 const SEG_COLORS = ['#c75e1a', '#1d4ed8', '#15803d', '#d97706', '#6b7280']
 const SEG_NAMES  = ['Header', 'Diffuser', 'Belly', 'Baffle', 'Stinger']
 
+function BadgeStatus({ value, base }) {
+  if (!base || base === 0) return null
+  const pct = Math.abs((parseFloat(value) - base) / base) * 100
+  const { bg, fg, text } =
+    pct <= 10 ? { bg: '#dcfce7', fg: '#15803d', text: 'OK' } :
+    pct <= 25 ? { bg: '#fef3c7', fg: '#b45309', text: 'MODIFIKASI' } :
+               { bg: '#fee2e2', fg: '#b91c1c', text: 'PERHATIKAN' }
+  return (
+    <span style={{
+      padding: '1px 7px', borderRadius: 6,
+      fontSize: 10, fontWeight: 700, background: bg, color: fg,
+    }}>{text}</span>
+  )
+}
+
+function initDims(data) {
+  return {
+    header:   { length: +data.L_header.toFixed(1) },
+    diffuser: { length: +data.L_diffuser.toFixed(1) },
+    belly:    { length: +Math.max(data.L_belly, 0).toFixed(1) },
+    baffle:   { length: +data.L_baffle.toFixed(1) },
+    stinger:  { length: +data.L_stinger.toFixed(1), id: +data.D_stinger.toFixed(1) },
+  }
+}
+
 function ExhaustSegment({ r1, r2, length, color, posX, infoLabel, clip, selected, onClick }) {
   const [hovered, setHovered] = useState(false)
   const labelY = Math.max(r1, r2) + 0.25
@@ -124,15 +149,15 @@ function ExhaustSegment({ r1, r2, length, color, posX, infoLabel, clip, selected
         </mesh>
       )}
 
-      {/* cap discs so ends don't show hollow */}
+      {/* cap discs — RIGHT end uses r1, LEFT end uses r2 */}
       {clip && (
         <>
-          <mesh position={[length / 2, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-            <ringGeometry args={[r2 * 0.86, r2, 32]} />
+          <mesh position={[length / 2, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+            <ringGeometry args={[r1 * 0.86, r1, 32]} />
             <meshStandardMaterial color="#8B4513" side={THREE.DoubleSide} clippingPlanes={[clip]} />
           </mesh>
-          <mesh position={[-length / 2, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-            <ringGeometry args={[r1 * 0.86, r1, 32]} />
+          <mesh position={[-length / 2, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+            <ringGeometry args={[r2 * 0.86, r2, 32]} />
             <meshStandardMaterial color="#8B4513" side={THREE.DoubleSide} clippingPlanes={[clip]} />
           </mesh>
         </>
@@ -214,12 +239,14 @@ function ExhaustScene({ data, showLabels, showFlow, crossSection, crossValue, se
     return pos
   }, [lens])
 
+  // r1 = RIGHT end radius, r2 = LEFT end radius
+  // (cylinder rotation [0,0,π/2] maps radiusTop→LEFT, radiusBottom→RIGHT)
   const radii = [
-    [rPort,  rPort],
-    [rPort,  rBelly],
-    [rBelly, rBelly],
-    [rBelly, rSting],
-    [rSting, rSting],
+    [rPort,  rPort ],  // Header: constant
+    [rBelly, rPort ],  // Diffuser: LEFT=small, RIGHT=large → grows left→right ✓
+    [rBelly, rBelly],  // Belly: constant large
+    [rSting, rBelly],  // Baffle: LEFT=large, RIGHT=small → shrinks left→right ✓
+    [rSting, rSting],  // Stinger: constant
   ]
 
   const clipPlane = useMemo(() => {
@@ -274,6 +301,65 @@ export function ExhaustViewer({ data }) {
 
   const merged = { ...data, dPort: data.dPort ?? data.D_belly / 2.5 }
 
+  const [editedDims, setEditedDims] = useState(() => initDims(merged))
+  const [prevData, setPrevData]     = useState(data)
+
+  // Reset edits when a new calculation arrives (update-during-render pattern)
+  if (data !== prevData) {
+    setPrevData(data)
+    setEditedDims(initDims(merged))
+    setSelected(null)
+  }
+
+  const updateDim = (seg, key, raw) => {
+    const n = parseFloat(raw)
+    if (isNaN(n) || n < 0) return
+    setEditedDims(prev => ({ ...prev, [seg]: { ...prev[seg], [key]: n } }))
+  }
+
+  const resetDims = () => setEditedDims(initDims(merged))
+
+  // Feed edited lengths/diameters into the 3D scene
+  const displayData = {
+    ...merged,
+    L_header:   editedDims.header.length,
+    L_diffuser: editedDims.diffuser.length,
+    L_belly:    editedDims.belly.length,
+    L_baffle:   editedDims.baffle.length,
+    L_stinger:  editedDims.stinger.length,
+    D_stinger:  editedDims.stinger.id,
+  }
+
+  const dimRow = (label, seg, key, unit, base) => (
+    <div key={`${seg}-${key}`} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+      <span style={{ fontSize: 12, color: '#374151', minWidth: 110 }}>{label}</span>
+      <input
+        type="number"
+        value={editedDims[seg][key]}
+        step="0.5"
+        min="0"
+        onChange={e => updateDim(seg, key, e.target.value)}
+        style={{
+          width: 78, padding: '4px 8px', border: '1px solid #d1d5db',
+          borderRadius: 6, fontSize: 13, fontFamily: 'system-ui',
+        }}
+      />
+      <span style={{ fontSize: 11, color: '#9ca3af' }}>{unit}</span>
+      <BadgeStatus value={editedDims[seg][key]} base={base} />
+    </div>
+  )
+
+  const editFields = {
+    0: [dimRow('Panjang', 'header',   'length', 'mm', data.L_header)],
+    1: [dimRow('Panjang', 'diffuser', 'length', 'mm', data.L_diffuser)],
+    2: [dimRow('Panjang', 'belly',    'length', 'mm', Math.max(data.L_belly, 0))],
+    3: [dimRow('Panjang', 'baffle',   'length', 'mm', data.L_baffle)],
+    4: [
+      dimRow('Panjang',     'stinger', 'length', 'mm', data.L_stinger),
+      dimRow('Diameter ID', 'stinger', 'id',     'mm', data.D_stinger),
+    ],
+  }
+
   return (
     <div>
       <ControlBar>
@@ -295,7 +381,7 @@ export function ExhaustViewer({ data }) {
       <CanvasWrap>
         <CameraResetter trigger={resetKey} />
         <ExhaustScene
-          data={merged}
+          data={displayData}
           showLabels={showLabels}
           showFlow={showFlow}
           crossSection={crossSection}
@@ -307,16 +393,24 @@ export function ExhaustViewer({ data }) {
 
       {selected !== null && (
         <div style={{
-          marginTop: 8, padding: '8px 14px', background: '#f9fafb',
-          border: `2px solid ${SEG_COLORS[selected]}`, borderRadius: 8,
-          fontSize: 12, color: '#374151',
+          marginTop: 8, padding: '12px 16px', background: '#f9fafb',
+          border: `1px solid #e5e7eb`,
+          borderLeft: `4px solid ${SEG_COLORS[selected]}`,
+          borderRadius: 8,
         }}>
-          <strong style={{ color: SEG_COLORS[selected] }}>{SEG_NAMES[selected]}</strong>
-          {selected === 0 && ` — Panjang: ${Math.round(data.L_header)}mm | Ø: ${Math.round(merged.dPort)}mm (konstan)`}
-          {selected === 1 && ` — Panjang: ${Math.round(data.L_diffuser)}mm | Ø: ${Math.round(merged.dPort)}→${Math.round(data.D_belly)}mm`}
-          {selected === 2 && ` — Panjang: ${Math.round(Math.max(data.L_belly, 0))}mm | Ø: ${Math.round(data.D_belly)}mm (konstan)`}
-          {selected === 3 && ` — Panjang: ${Math.round(data.L_baffle)}mm | Ø: ${Math.round(data.D_belly)}→${Math.round(data.D_stinger)}mm`}
-          {selected === 4 && ` — Panjang: ${Math.round(data.L_stinger)}mm | Ø: ${Math.round(data.D_stinger)}mm (konstan)`}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Edit Dimensi — <span style={{ color: SEG_COLORS[selected] }}>{SEG_NAMES[selected]}</span>
+            </span>
+            <button onClick={resetDims} style={{
+              fontSize: 11, padding: '3px 10px', border: '1px solid #d1d5db',
+              borderRadius: 6, background: '#fff', color: '#374151', cursor: 'pointer',
+            }}>↩ Reset ke kalkulasi</button>
+          </div>
+          {editFields[selected]}
+          <div style={{ marginTop: 6, fontSize: 11, color: '#9ca3af' }}>
+            Badge warna menunjukkan deviasi dari nilai kalkulasi: ≤10% OK · 10–25% MODIFIKASI · &gt;25% PERHATIKAN
+          </div>
         </div>
       )}
     </div>
