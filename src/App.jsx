@@ -482,6 +482,8 @@ function ExhaustTab() {
           : [L_header, L_diffuser, Math.max(L_belly, 0), L_baffle, L_stinger]
         const totalVis = segs.reduce((a, b) => a + b, 0)
 
+        const isMobile = typeof window !== 'undefined' && window.innerWidth < 640
+
         return (
           <>
             {bellyMsg && (
@@ -493,6 +495,7 @@ function ExhaustTab() {
               }}>⚠ {bellyMsg}</div>
             )}
 
+            {/* Baris 1: Dimensi Segmen — full width */}
             <Card title="Dimensi Segmen">
               <MetricGrid>
                 <Metric label="Header" value={fmt(L_header)} unit="mm" />
@@ -523,22 +526,45 @@ function ExhaustTab() {
               </div>
             </Card>
 
-            {dims && (
-              <Card title="Sesuaikan Dimensi">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>
-                    Geser slider — segmen lain menyesuaikan proporsional
+            {/* Baris 2: Slider + 3D — side by side */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: isMobile ? '1fr' : '40% 60%',
+              gap: 12,
+              marginBottom: 12,
+              alignItems: 'start',
+            }}>
+              {/* Kolom kiri: Panel slider */}
+              <div style={{
+                background: '#fff',
+                border: '1px solid #e5e7eb',
+                borderRadius: 12,
+                padding: '16px 18px',
+                position: 'sticky',
+                top: 16,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Sesuaikan Dimensi
                   </div>
-                  {isModified && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {isModified && (
+                      <span style={{ fontSize: 10, color: '#b45309', background: '#fef3c7', padding: '2px 6px', borderRadius: 4 }}>
+                        ✏️ Dimodifikasi
+                      </span>
+                    )}
                     <button onClick={resetToCalc} style={{
-                      padding: '4px 12px', background: '#f3f4f6', border: '1px solid #d1d5db',
-                      borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'system-ui',
-                      color: '#374151', flexShrink: 0, marginLeft: 8,
+                      fontSize: 10, padding: '3px 8px', border: '1px solid #d1d5db',
+                      borderRadius: 6, background: '#f9fafb', cursor: 'pointer',
+                      color: '#374151', fontFamily: 'system-ui',
                     }}>↺ Reset</button>
-                  )}
+                  </div>
                 </div>
-                {[
-                  { key: 'header',   label: 'Header',   color: segColors[0], hint: 'Pipa sebelum diffuser' },
+                <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 10 }}>
+                  Geser slider — segmen lain menyesuaikan proporsional
+                </div>
+                {dims && [
+                  { key: 'header',   label: 'Header',   color: segColors[0], hint: 'Pipa awal' },
                   { key: 'diffuser', label: 'Diffuser', color: segColors[1], hint: 'Kerucut melebar' },
                   { key: 'belly',    label: 'Belly',    color: segColors[2], hint: 'Silinder tengah' },
                   { key: 'baffle',   label: 'Baffle',   color: segColors[3], hint: 'Kerucut mengecil' },
@@ -556,10 +582,23 @@ function ExhaustTab() {
                     onChange={v => updateDimProportional(key, v)}
                   />
                 ))}
-                <RPMImpactDisplay dims={dims} targetTotal={result.L_total} rpmNum={p(rpm)} />
-              </Card>
-            )}
+                {dims && <RPMImpactDisplay dims={dims} targetTotal={result.L_total} rpmNum={p(rpm)} />}
+              </div>
 
+              {/* Kolom kanan: Visualisasi 3D */}
+              <div>
+                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontWeight: 600 }}>Visualisasi 3D</span>
+                  <span style={{ color: '#9ca3af' }}>— drag rotate, scroll zoom</span>
+                </div>
+                <ExhaustViewer data={result} dims={dims} onDimChange={updateDimProportional} />
+                <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4, textAlign: 'center' }}>
+                  💡 Drag handle putih antar segmen untuk ubah dimensi
+                </div>
+              </div>
+            </div>
+
+            {/* Baris 3: Diameter & Sudut — full width */}
             <Card title="Diameter & Sudut">
               <MetricGrid>
                 <Metric label="D Belly" value={fmt(D_belly)} unit="mm" />
@@ -574,14 +613,6 @@ function ExhaustTab() {
 
             <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'right' }}>
               Ref: Graham Bell Performance Tuning — Tabel 4.4, 4.5, 4.6
-            </div>
-
-            <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                Visualisasi 3D Interaktif
-                <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>— drag untuk rotate, scroll untuk zoom</span>
-              </div>
-              <ExhaustViewer data={result} dims={dims} onDimChange={updateDimProportional} />
             </div>
           </>
         )
@@ -911,7 +942,7 @@ export default function App() {
 
   return (
     <div style={{
-      maxWidth: 720, margin: '0 auto', padding: '1.5rem 1rem',
+      maxWidth: 1100, margin: '0 auto', padding: '1.5rem 1rem',
       fontFamily: 'system-ui, sans-serif', color: '#111827',
     }}>
       <div style={{ marginBottom: 24, textAlign: 'center' }}>
