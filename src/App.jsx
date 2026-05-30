@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ExhaustViewer, PortViewer, ECUViewer } from './components/Viewer3D'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 const fmt = (n, dec = 1) => {
@@ -288,10 +289,11 @@ function ExhaustTab() {
   const p = v => parseFloat(v) || 0
 
   const calc = () => {
-    setResult(calcExhaustData({
+    const res = calcExhaustData({
       rpm: p(rpm), cc: p(cc), exDur: p(exDur), dPort: p(dPort),
       type, diffStages: parseInt(diffStages), sos: p(sos),
-    }))
+    })
+    setResult({ ...res, dPort: p(dPort) })
   }
 
   const segColors = ['#c75e1a', '#eab308', '#3b82f6', '#ef4444', '#6b7280']
@@ -390,6 +392,14 @@ function ExhaustTab() {
             <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'right' }}>
               Ref: Graham Bell Performance Tuning — Tabel 4.4, 4.5, 4.6
             </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                Visualisasi 3D Interaktif
+                <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>— drag untuk rotate, scroll untuk zoom</span>
+              </div>
+              <ExhaustViewer data={result} />
+            </div>
           </>
         )
       })()}
@@ -408,14 +418,14 @@ function PortTab() {
   const [Vc, setVc] = useState('8.5')
   const [rpm, setRpm] = useState('11000')
   const [result, setResult] = useState(null)
+  const [formSnap, setFormSnap] = useState(null)
 
   const p = v => parseFloat(v) || 0
 
   const calc = () => {
-    setResult(calcPortData({
-      bore: p(bore), stroke: p(stroke), conrod: p(conrod),
-      E: p(E), C: p(C), Et: p(Et), Vc: p(Vc), rpm: p(rpm),
-    }))
+    const f = { bore: p(bore), stroke: p(stroke), conrod: p(conrod), E: p(E), C: p(C), Et: p(Et), Vc: p(Vc), rpm: p(rpm) }
+    setFormSnap(f)
+    setResult(calcPortData(f))
   }
 
   return (
@@ -546,6 +556,14 @@ function PortTab() {
                 </div>
               )}
             </Card>
+
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                Visualisasi 3D Interaktif
+                <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>— drag untuk rotate, scroll untuk zoom</span>
+              </div>
+              <PortViewer data={result} form={formSnap} />
+            </div>
           </>
         )
       })()}
@@ -659,6 +677,14 @@ function ECUTab() {
                 </ul>
               </Card>
             )}
+
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                Visualisasi 3D Interaktif
+                <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>— drag untuk rotate, scroll untuk zoom</span>
+              </div>
+              <ECUViewer data={result} />
+            </div>
           </>
         )
       })()}
