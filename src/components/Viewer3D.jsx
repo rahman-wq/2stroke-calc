@@ -38,7 +38,7 @@ function SliderCtrl({ label, value, min, max, step = 0.01, onChange }) {
 
 function CanvasWrap({ children }) {
   return (
-    <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', height: 420, width: '100%', background: '#1a1a2e' }}>
+    <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', height: 420, width: '100%', background: '#e8e8f0' }}>
       <Canvas
         shadows
         camera={{ fov: 50, position: [0, 0, 8] }}
