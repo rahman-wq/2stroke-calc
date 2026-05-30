@@ -212,9 +212,83 @@ function GasParticles({ active }) {
   )
 }
 
+function DragHandle({ posX, segKey, dimValue, onDimChange, mmPerUnit, handleY, controlsRef }) {
+  const { camera, size } = useThree()
+  const dragging = useRef(false)
+  const startX = useRef(0)
+  const startVal = useRef(0)
+  const [hovered, setHovered] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [tooltip, setTooltip] = useState(null)
+
+  const getPxPerUnit = () => {
+    const a = new THREE.Vector3(-3, 0, 0).project(camera)
+    const b = new THREE.Vector3(3, 0, 0).project(camera)
+    return Math.max(1, Math.abs((b.x - a.x) * size.width / 2)) / 6
+  }
+
+  const active = hovered || isDragging
+
+  return (
+    <group position={[posX, 0, 0]}>
+      <mesh
+        position={[0, handleY, 0]}
+        onPointerDown={e => {
+          e.stopPropagation()
+          e.target.setPointerCapture(e.pointerId)
+          dragging.current = true
+          setIsDragging(true)
+          startX.current = e.clientX
+          startVal.current = dimValue
+          if (controlsRef.current) controlsRef.current.enabled = false
+          setTooltip(`${Math.round(dimValue)} mm`)
+        }}
+        onPointerMove={e => {
+          if (!dragging.current) return
+          const dx = e.clientX - startX.current
+          const newVal = Math.max(5, startVal.current + dx * (mmPerUnit / getPxPerUnit()))
+          onDimChange(segKey, newVal)
+          setTooltip(`${Math.round(newVal)} mm`)
+        }}
+        onPointerUp={e => {
+          e.target.releasePointerCapture(e.pointerId)
+          dragging.current = false
+          setIsDragging(false)
+          setTooltip(null)
+          setHovered(false)
+          if (controlsRef.current) controlsRef.current.enabled = true
+        }}
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => { if (!dragging.current) setHovered(false) }}
+      >
+        <sphereGeometry args={[0.1, 12, 8]} />
+        <meshStandardMaterial
+          color={active ? '#c75e1a' : '#f0f0f0'}
+          emissive={active ? '#c75e1a' : '#000000'}
+          emissiveIntensity={active ? 0.6 : 0}
+          metalness={0.8}
+          roughness={0.15}
+        />
+      </mesh>
+      {(active || tooltip) && (
+        <Html center position={[0, handleY + 0.35, 0]}>
+          <div style={{
+            background: 'rgba(0,0,0,0.8)', color: '#fff',
+            fontSize: 11, padding: '3px 8px', borderRadius: 4,
+            whiteSpace: 'nowrap', pointerEvents: 'none',
+          }}>
+            {tooltip ?? '↔ Drag'}
+          </div>
+        </Html>
+      )}
+    </group>
+  )
+}
+
 // All hooks before any conditional logic
-function ExhaustScene({ data, showLabels, showFlow, crossSection, crossValue, selected, onSelect }) {
+function ExhaustScene({ data, showLabels, showFlow, crossSection, crossValue, selected, onSelect, onDimChange }) {
   const { L_header, L_diffuser, L_belly, L_baffle, L_stinger, D_belly, D_stinger, dPort } = data
+  const controlsRef = useRef()
 
   const L_total = L_header + L_diffuser + Math.max(L_belly, 0) + L_baffle + L_stinger
 
@@ -248,6 +322,19 @@ function ExhaustScene({ data, showLabels, showFlow, crossSection, crossValue, se
     [rSting, rBelly],  // Baffle: LEFT=large, RIGHT=small → shrinks left→right ✓
     [rSting, rSting],  // Stinger: constant
   ]
+
+  const segKeys = ['header', 'diffuser', 'belly', 'baffle', 'stinger']
+  const mmPerUnit = L_total > 0 ? L_total / 6 : 1
+
+  const boundaries = useMemo(() => {
+    const b = []
+    let cursor = -3
+    for (let i = 0; i < lens.length - 1; i++) {
+      cursor += lens[i]
+      b.push(cursor)
+    }
+    return b
+  }, [lens])
 
   const clipPlane = useMemo(() => {
     if (!crossSection) return null
@@ -286,12 +373,26 @@ function ExhaustScene({ data, showLabels, showFlow, crossSection, crossValue, se
         ) : null
       )}
       <GasParticles active={showFlow} />
-      <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
+      {onDimChange && boundaries.map((bx, i) =>
+        lens[i] > 0.005 && lens[i + 1] > 0.005 ? (
+          <DragHandle
+            key={i}
+            posX={bx}
+            segKey={segKeys[i]}
+            dimValue={[L_header, L_diffuser, Math.max(L_belly, 0), L_baffle, L_stinger][i]}
+            onDimChange={onDimChange}
+            mmPerUnit={mmPerUnit}
+            handleY={rBelly + 0.22}
+            controlsRef={controlsRef}
+          />
+        ) : null
+      )}
+      <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.1} />
     </>
   )
 }
 
-export function ExhaustViewer({ data }) {
+export function ExhaustViewer({ data, dims: externalDims, onDimChange }) {
   const [showLabels, setShowLabels] = useState(false)
   const [showFlow, setShowFlow]     = useState(false)
   const [crossSection, setCross]    = useState(false)
@@ -319,14 +420,14 @@ export function ExhaustViewer({ data }) {
 
   const resetDims = () => setEditedDims(initDims(merged))
 
-  // Feed edited lengths/diameters into the 3D scene
+  // External dims (from App.jsx sliders/drag) take priority over internal edits
   const displayData = {
     ...merged,
-    L_header:   editedDims.header.length,
-    L_diffuser: editedDims.diffuser.length,
-    L_belly:    editedDims.belly.length,
-    L_baffle:   editedDims.baffle.length,
-    L_stinger:  editedDims.stinger.length,
+    L_header:   externalDims?.header   ?? editedDims.header.length,
+    L_diffuser: externalDims?.diffuser ?? editedDims.diffuser.length,
+    L_belly:    externalDims?.belly    ?? editedDims.belly.length,
+    L_baffle:   externalDims?.baffle   ?? editedDims.baffle.length,
+    L_stinger:  externalDims?.stinger  ?? editedDims.stinger.length,
     D_stinger:  editedDims.stinger.id,
   }
 
@@ -388,6 +489,7 @@ export function ExhaustViewer({ data }) {
           crossValue={crossValue}
           selected={selected}
           onSelect={setSelected}
+          onDimChange={onDimChange}
         />
       </CanvasWrap>
 

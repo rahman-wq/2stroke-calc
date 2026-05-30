@@ -307,6 +307,71 @@ function CalcBtn({ onClick }) {
   )
 }
 
+// ─── Slider helpers ──────────────────────────────────────────────────────────
+function SliderRow({ label, color, hint, value, baseValue, min, max, onChange }) {
+  const pct = baseValue > 0 ? ((value - baseValue) / baseValue) * 100 : 0
+  const abs = Math.abs(pct)
+  const status = abs < 10 ? 'ok' : abs < 25 ? 'warn' : 'danger'
+  const sBg = status === 'ok' ? '#dcfce7' : status === 'warn' ? '#fef3c7' : '#fee2e2'
+  const sFg = status === 'ok' ? '#15803d' : status === 'warn' ? '#b45309' : '#b91c1c'
+  const sLabel = status === 'ok'
+    ? 'Sesuai kalkulasi'
+    : `${pct > 0 ? '+' : ''}${pct.toFixed(0)}%${status === 'danger' ? ' ⚠' : ''}`
+  const markerPct = Math.max(0, Math.min(100, ((baseValue - min) / (max - min)) * 100))
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: color, display: 'inline-block', flexShrink: 0 }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{label}</span>
+          <span style={{ fontSize: 11, color: '#9ca3af' }}>{hint}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 4, background: sBg, color: sFg, whiteSpace: 'nowrap' }}>
+            {sLabel}
+          </span>
+          <input
+            type="number" value={Math.round(value)}
+            onChange={e => onChange(e.target.value)}
+            style={{ width: 68, padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 12, textAlign: 'right', fontFamily: 'system-ui' }}
+          />
+          <span style={{ fontSize: 11, color: '#9ca3af' }}>mm</span>
+        </div>
+      </div>
+      <div style={{ position: 'relative' }}>
+        <input
+          type="range" min={min} max={max} step={1}
+          value={Math.round(value)}
+          onChange={e => onChange(e.target.value)}
+          style={{ width: '100%', accentColor: color, cursor: 'pointer', display: 'block' }}
+        />
+        <div style={{
+          position: 'absolute', left: `${markerPct}%`, top: 0,
+          width: 2, height: 20, background: '#94a3b8', borderRadius: 1,
+          pointerEvents: 'none', transform: 'translateX(-50%)',
+        }} />
+      </div>
+      <div style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', marginTop: 2 }}>
+        Kalkulasi awal: {Math.round(baseValue)} mm
+      </div>
+    </div>
+  )
+}
+
+function RPMImpactDisplay({ dims, targetTotal, rpmNum }) {
+  const currentTotal = Object.values(dims).reduce((a, b) => a + b, 0)
+  if (Math.abs(currentTotal - targetTotal) < 5) return null
+  const rpmShift = Math.round(rpmNum * (targetTotal / currentTotal) - rpmNum)
+  return (
+    <div style={{ marginTop: 8, padding: '8px 12px', background: '#f0f9ff', borderRadius: 6, fontSize: 12, color: '#0369a1' }}>
+      📊 Estimasi: power peak bergeser{' '}
+      <strong>{rpmShift > 0 ? '+' : ''}{rpmShift} RPM</strong>
+      {' '}({rpmShift > 0 ? 'naik — pipa lebih pendek' : 'turun — pipa lebih panjang'})
+    </div>
+  )
+}
+
 // ─── Modul 1: Exhaust Tab ────────────────────────────────────────────────────
 function ExhaustTab() {
   const [rpm, setRpm] = useState('11000')
@@ -317,6 +382,8 @@ function ExhaustTab() {
   const [diffStages, setDiffStages] = useState('1')
   const [sos, setSos] = useState('345')
   const [result, setResult] = useState(null)
+  const [dims, setDims] = useState(null)
+  const [isModified, setIsModified] = useState(false)
 
   const p = v => parseFloat(v) || 0
 
@@ -326,6 +393,43 @@ function ExhaustTab() {
       type, diffStages: parseInt(diffStages), sos: p(sos),
     })
     setResult({ ...res, dPort: p(dPort) })
+    setDims({
+      header: res.L_header,
+      diffuser: res.L_diffuser,
+      belly: Math.max(0, res.L_belly),
+      baffle: res.L_baffle,
+      stinger: res.L_stinger,
+    })
+    setIsModified(false)
+  }
+
+  const updateDimProportional = (changedKey, newValue) => {
+    if (!dims || !result) return
+    const newVal = Math.max(5, parseFloat(newValue) || 0)
+    const keys = ['header', 'diffuser', 'belly', 'baffle', 'stinger']
+    const otherKeys = keys.filter(k => k !== changedKey)
+    const currentOtherTotal = otherKeys.reduce((a, k) => a + dims[k], 0)
+    const targetOtherTotal = result.L_total - newVal
+    if (targetOtherTotal < otherKeys.length * 5) return
+    const scale = currentOtherTotal > 0 ? targetOtherTotal / currentOtherTotal : 1
+    const newDims = { ...dims, [changedKey]: newVal }
+    otherKeys.forEach(k => { newDims[k] = Math.max(5, dims[k] * scale) })
+    const actualTotal = Object.values(newDims).reduce((a, b) => a + b, 0)
+    newDims.belly = Math.max(5, newDims.belly + (result.L_total - actualTotal))
+    setDims(newDims)
+    setIsModified(true)
+  }
+
+  const resetToCalc = () => {
+    if (!result) return
+    setDims({
+      header: result.L_header,
+      diffuser: result.L_diffuser,
+      belly: Math.max(0, result.L_belly),
+      baffle: result.L_baffle,
+      stinger: result.L_stinger,
+    })
+    setIsModified(false)
   }
 
   const segColors = ['#c75e1a', '#eab308', '#3b82f6', '#ef4444', '#6b7280']
@@ -373,7 +477,9 @@ function ExhaustTab() {
           D_belly, D_stinger, alpha_diff, alpha_baffle, diffAngles,
           bellyStatus, bellyMsg } = result
 
-        const segs = [L_header, L_diffuser, Math.max(L_belly, 0), L_baffle, L_stinger]
+        const segs = dims
+          ? [dims.header, dims.diffuser, Math.max(dims.belly, 0), dims.baffle, dims.stinger]
+          : [L_header, L_diffuser, Math.max(L_belly, 0), L_baffle, L_stinger]
         const totalVis = segs.reduce((a, b) => a + b, 0)
 
         return (
@@ -417,6 +523,43 @@ function ExhaustTab() {
               </div>
             </Card>
 
+            {dims && (
+              <Card title="Sesuaikan Dimensi">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>
+                    Geser slider — segmen lain menyesuaikan proporsional
+                  </div>
+                  {isModified && (
+                    <button onClick={resetToCalc} style={{
+                      padding: '4px 12px', background: '#f3f4f6', border: '1px solid #d1d5db',
+                      borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'system-ui',
+                      color: '#374151', flexShrink: 0, marginLeft: 8,
+                    }}>↺ Reset</button>
+                  )}
+                </div>
+                {[
+                  { key: 'header',   label: 'Header',   color: segColors[0], hint: 'Pipa sebelum diffuser' },
+                  { key: 'diffuser', label: 'Diffuser', color: segColors[1], hint: 'Kerucut melebar' },
+                  { key: 'belly',    label: 'Belly',    color: segColors[2], hint: 'Silinder tengah' },
+                  { key: 'baffle',   label: 'Baffle',   color: segColors[3], hint: 'Kerucut mengecil' },
+                  { key: 'stinger',  label: 'Stinger',  color: segColors[4], hint: 'Pipa keluar' },
+                ].map(({ key, label, color, hint }) => (
+                  <SliderRow
+                    key={key}
+                    label={label}
+                    color={color}
+                    hint={hint}
+                    value={dims[key]}
+                    baseValue={result[`L_${key}`] ?? 0}
+                    min={5}
+                    max={Math.round(result.L_total * 0.7)}
+                    onChange={v => updateDimProportional(key, v)}
+                  />
+                ))}
+                <RPMImpactDisplay dims={dims} targetTotal={result.L_total} rpmNum={p(rpm)} />
+              </Card>
+            )}
+
             <Card title="Diameter & Sudut">
               <MetricGrid>
                 <Metric label="D Belly" value={fmt(D_belly)} unit="mm" />
@@ -438,7 +581,7 @@ function ExhaustTab() {
                 Visualisasi 3D Interaktif
                 <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>— drag untuk rotate, scroll untuk zoom</span>
               </div>
-              <ExhaustViewer data={result} />
+              <ExhaustViewer data={result} dims={dims} onDimChange={updateDimProportional} />
             </div>
           </>
         )
