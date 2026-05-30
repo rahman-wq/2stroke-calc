@@ -422,7 +422,7 @@ function RPMImpactDisplay({ dims, targetTotal, rpmNum }) {
 }
 
 // ─── Modul 1: Exhaust Tab ────────────────────────────────────────────────────
-function ExhaustTab({ masterParams }) {
+function ExhaustTab({ masterParams, onDone }) {
   const [rpm, setRpm] = useState('11000')
   const [cc, setCc] = useState('125')
   const [exDur, setExDur] = useState('196')
@@ -462,6 +462,7 @@ function ExhaustTab({ masterParams }) {
       stinger: res.L_stinger,
     })
     setIsModified(false)
+    onDone?.()
   }
 
   const updateDimProportional = (changedKey, newValue) => {
@@ -810,7 +811,7 @@ function ExhaustTab({ masterParams }) {
 }
 
 // ─── Modul 2: Port & Stroke Tab ──────────────────────────────────────────────
-function PortTab({ onMasterUpdate }) {
+function PortTab({ onMasterUpdate, onDone }) {
   const [bore, setBore] = useState('54')
   const [stroke, setStroke] = useState('54')
   const [conrod, setConrod] = useState('105')
@@ -836,6 +837,7 @@ function PortTab({ onMasterUpdate }) {
       epo: res.EPO, epc: res.EPC, tpo: res.TPO, tpc: res.TPC,
       calculatedAt: Date.now(),
     })
+    onDone?.()
   }
 
   return (
@@ -988,7 +990,7 @@ function PortTab({ onMasterUpdate }) {
 }
 
 // ─── Modul 3: ECU Tab ────────────────────────────────────────────────────────
-function ECUTab({ masterParams }) {
+function ECUTab({ masterParams, onDone }) {
   const [rpmCurrent, setRpmCurrent] = useState('9500')
   const [tps, setTps] = useState('85')
   const [map, setMap] = useState('90')
@@ -1018,6 +1020,7 @@ function ECUTab({ masterParams }) {
       temp: p(temp), lambda: p(lambda), oktan: p(oktan),
       rpmPeak: p(rpmPeak), exDur: p(exDur), cr: p(cr),
     }))
+    onDone?.()
   }
 
   const zoneColor = z => {
@@ -1169,27 +1172,44 @@ function ECUTab({ masterParams }) {
 
 // ─── App shell ───────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'exhaust', label: '🔩 Knalpot' },
-  { id: 'port', label: '⚙ Port & Stroke' },
-  { id: 'ecu', label: '💡 ECU Optimizer' },
+  { id: 'port',    label: 'Port & Stroke',  icon: '⚙️',  step: 1 },
+  { id: 'exhaust', label: 'Knalpot',         icon: '🔥',  step: 2 },
+  { id: 'ecu',     label: 'ECU Optimizer',   icon: '💡',  step: 3 },
 ]
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('exhaust')
+  const [activeTab, setActiveTab] = useState('port')
   const [masterParams, setMasterParams] = useState(null)
+  const [hasResult, setHasResult] = useState({ port: false, exhaust: false, ecu: false })
+
+  const markDone = id => setHasResult(prev => ({ ...prev, [id]: true }))
 
   return (
     <div style={{
       maxWidth: 1100, margin: '0 auto', padding: '1.5rem 1rem',
       fontFamily: 'system-ui, sans-serif', color: '#111827',
     }}>
-      <div style={{ marginBottom: 24, textAlign: 'center' }}>
+      <div style={{ marginBottom: 16, textAlign: 'center' }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: S.accent, letterSpacing: -0.5 }}>
           2-Stroke Calc
         </div>
         <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
           Expansion Chamber · Port Timing · ECU Mapping
         </div>
+      </div>
+
+      {/* Workflow banner */}
+      <div style={{
+        background: '#fdf0e8', border: '1px solid #e8a070', borderRadius: 8,
+        padding: '8px 14px', marginBottom: 8, fontSize: 12, color: '#92400e',
+        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+      }}>
+        <span style={{ fontWeight: 600 }}>Alur input data:</span>
+        <span>① Isi Port &amp; Stroke terlebih dahulu</span>
+        <span style={{ color: S.accent }}>→</span>
+        <span>② Hitung Knalpot optimal</span>
+        <span style={{ color: S.accent }}>→</span>
+        <span>③ Evaluasi dengan ECU Optimizer</span>
       </div>
 
       {/* Tab bar */}
@@ -1203,13 +1223,29 @@ export default function App() {
             color: activeTab === t.id ? S.accent : '#6b7280',
             borderBottom: activeTab === t.id ? `2px solid ${S.accent}` : '2px solid transparent',
             marginBottom: -2, borderRadius: '4px 4px 0 0', transition: 'color 0.15s',
-          }}>{t.label}</button>
+            display: 'inline-flex', alignItems: 'center',
+          }}>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 18, height: 18, borderRadius: '50%',
+              background: activeTab === t.id ? S.accent : '#e5e7eb',
+              color: activeTab === t.id ? '#fff' : '#6b7280',
+              fontSize: 10, fontWeight: 700, marginRight: 6, flexShrink: 0,
+            }}>{t.step}</span>
+            {t.icon} {t.label}
+            {hasResult[t.id] && (
+              <span style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: '#15803d', marginLeft: 6, display: 'inline-block', flexShrink: 0,
+              }} />
+            )}
+          </button>
         ))}
       </div>
 
-      {activeTab === 'exhaust' && <ExhaustTab masterParams={masterParams} />}
-      {activeTab === 'port' && <PortTab onMasterUpdate={setMasterParams} />}
-      {activeTab === 'ecu' && <ECUTab masterParams={masterParams} />}
+      {activeTab === 'exhaust' && <ExhaustTab masterParams={masterParams} onDone={() => markDone('exhaust')} />}
+      {activeTab === 'port' && <PortTab onMasterUpdate={setMasterParams} onDone={() => markDone('port')} />}
+      {activeTab === 'ecu' && <ECUTab masterParams={masterParams} onDone={() => markDone('ecu')} />}
 
       <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 16 }}>
         Ref: Graham Bell 'Performance Tuning in a Weekend' · 2s-tools.abdurrahman.sbs
