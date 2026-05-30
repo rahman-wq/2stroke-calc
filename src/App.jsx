@@ -162,6 +162,55 @@ function calcECUData(p) {
   }
 }
 
+function calcGasFlow(port, exhaust, octane) {
+  const { dur_ex = 196, dur_tr = 170, blowdown = 26, cr = 12, rpm = 11000 } = port
+  const { L_header = 266, L_diffuser = 150, L_belly = 200, L_baffle = 80, L_stinger = 200,
+          D_belly = 100, D_stinger = 23, dPort = 40, alpha_diff = 7 } = exhaust
+
+  const T_exhaust_C = 450 + (octane - 87) * 8
+  const T_exhaust_K = T_exhaust_C + 273
+  const SOS_exhaust = 345 * Math.sqrt(T_exhaust_K / 293)
+
+  const v_port_ms = SOS_exhaust * 0.85
+
+  const A_port  = Math.PI / 4 * Math.pow(dPort / 1000, 2)
+  const rho     = 0.45
+  const mass_flow = rho * A_port * v_port_ms
+
+  const t_total = (L_header + L_diffuser + Math.max(L_belly, 0) + L_baffle + L_stinger) / 1000 / SOS_exhaust
+  const RPM_optimal = t_total > 0 ? ((360 - dur_ex) / 360 * 60) / t_total : rpm
+
+  const blowdown_f = blowdown >= 20 && blowdown <= 40 ? 1.0 : blowdown < 20 ? 0.7 : 0.85
+  const transfer_f = dur_tr >= 120 && dur_tr <= 142 ? 1.0 : 0.85
+  const cr_f       = cr >= 10 && cr <= 14 ? 1.0 : 0.9
+  const scav_eff   = blowdown_f * transfer_f * cr_f * 100
+  const fuel_loss  = 25 * (1 + (20 - Math.max(20, blowdown)) / 20)
+
+  const A_belly   = Math.PI / 4 * Math.pow(D_belly   / 1000, 2)
+  const A_stinger = Math.PI / 4 * Math.pow(D_stinger / 1000, 2)
+  const M_header  = v_port_ms / SOS_exhaust
+  const M_belly   = A_belly   > 0 ? (mass_flow / rho / A_belly)   / (345 * Math.sqrt(T_exhaust_K * 0.75 / 293)) : 0
+  const M_stinger = A_stinger > 0 ? (mass_flow / rho / A_stinger) / (345 * Math.sqrt(T_exhaust_K * 0.60 / 293)) : 0
+
+  const P_header  = 1.8
+  const P_belly   = D_belly   > 0 ? P_header * Math.pow(dPort / D_belly, 2)   : 0
+  const P_stinger = D_stinger > 0 ? P_belly  * Math.pow(D_belly / D_stinger, 2) * 0.6 : 0
+
+  const eddy_risk   = alpha_diff > 8 ? 'TINGGI' : alpha_diff > 6 ? 'SEDANG' : 'RENDAH'
+  const pulse_match = Math.abs(RPM_optimal - rpm) < 300 ? 'OPTIMAL'
+    : Math.abs(RPM_optimal - rpm) < 800 ? 'MENDEKATI' : 'PERLU PENYESUAIAN'
+
+  return {
+    SOS_exhaust: Math.round(SOS_exhaust), T_exhaust_C: Math.round(T_exhaust_C),
+    v_port_ms: Math.round(v_port_ms), mass_flow_gs: Math.round(mass_flow * 1000),
+    t_total_ms: (t_total * 1000).toFixed(2), RPM_optimal: Math.round(RPM_optimal),
+    scav_eff: Math.round(scav_eff), fuel_loss: Math.round(fuel_loss),
+    M_header: M_header.toFixed(3), M_belly: M_belly.toFixed(3), M_stinger: M_stinger.toFixed(3),
+    P_header: P_header.toFixed(2), P_belly: P_belly.toFixed(2), P_stinger: P_stinger.toFixed(2),
+    eddy_risk, diffuser_ang: alpha_diff, pulse_match,
+  }
+}
+
 // ─── base UI components ──────────────────────────────────────────────────────
 const S = {
   ok: '#15803d', warn: '#b45309', danger: '#b91c1c',
@@ -373,7 +422,7 @@ function RPMImpactDisplay({ dims, targetTotal, rpmNum }) {
 }
 
 // ─── Modul 1: Exhaust Tab ────────────────────────────────────────────────────
-function ExhaustTab() {
+function ExhaustTab({ masterParams }) {
   const [rpm, setRpm] = useState('11000')
   const [cc, setCc] = useState('125')
   const [exDur, setExDur] = useState('196')
@@ -381,15 +430,27 @@ function ExhaustTab() {
   const [type, setType] = useState('roadrace')
   const [diffStages, setDiffStages] = useState('1')
   const [sos, setSos] = useState('345')
+  const [octane, setOctane] = useState('92')
   const [result, setResult] = useState(null)
   const [dims, setDims] = useState(null)
   const [isModified, setIsModified] = useState(false)
+  const [syncOverride, setSyncOverride] = useState(false)
+  const [prevMaster, setPrevMaster] = useState(masterParams)
+
+  if (masterParams !== prevMaster) {
+    setPrevMaster(masterParams)
+    setSyncOverride(false)
+  }
 
   const p = v => parseFloat(v) || 0
 
+  const synced   = !!masterParams && !syncOverride
+  const effRpm   = synced ? masterParams.rpm    : p(rpm)
+  const effExDur = synced ? (masterParams.dur_ex ?? p(exDur)) : p(exDur)
+
   const calc = () => {
     const res = calcExhaustData({
-      rpm: p(rpm), cc: p(cc), exDur: p(exDur), dPort: p(dPort),
+      rpm: effRpm, cc: p(cc), exDur: effExDur, dPort: p(dPort),
       type, diffStages: parseInt(diffStages), sos: p(sos),
     })
     setResult({ ...res, dPort: p(dPort) })
@@ -435,18 +496,63 @@ function ExhaustTab() {
   const segColors = ['#c75e1a', '#eab308', '#3b82f6', '#ef4444', '#6b7280']
   const segNames = ['Header', 'Diffuser', 'Belly', 'Baffle', 'Stinger']
 
+  const sosHint = (() => {
+    const t = 450 + (p(octane) - 87) * 8
+    return `Estimasi SOS gas buang: ${Math.round(345 * Math.sqrt((t + 273) / 293))} m/s @ ${Math.round(t)}°C`
+  })()
+
   return (
     <div>
+      {synced && (
+        <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>
+              ✅ Parameter port tersinkron — klik Hitung untuk optimasi knalpot otomatis
+            </span>
+            <button onClick={() => setSyncOverride(true)} style={{
+              fontSize: 11, padding: '3px 10px', border: '1px solid #86efac',
+              borderRadius: 6, background: '#fff', color: '#15803d', cursor: 'pointer',
+              fontFamily: 'system-ui', marginLeft: 8, flexShrink: 0,
+            }}>🔓 Lepas sinkronisasi</button>
+          </div>
+        </div>
+      )}
       <Card title="Parameter Input" accent>
         <Grid cols={2}>
           <Field label="RPM Target" hint="Puncak RPM yang ingin dicapai mesin">
-            <InputWithNotice value={rpm} onChange={setRpm} step={100} warn={14000} danger={16000} />
+            <div style={{ position: 'relative' }}>
+              <input
+                type="number" value={synced ? effRpm : rpm} disabled={synced}
+                onChange={e => setRpm(e.target.value)}
+                style={{
+                  width: '100%', padding: '7px 10px', boxSizing: 'border-box',
+                  border: `1px solid ${synced ? '#86efac' : '#d1d5db'}`, borderRadius: 8,
+                  fontSize: 14, fontFamily: 'system-ui', outline: 'none',
+                  background: synced ? '#f0fdf4' : '#fff', color: '#111',
+                  paddingRight: synced ? 110 : undefined,
+                }}
+              />
+              {synced && <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#15803d', pointerEvents: 'none' }}>🔗 Port & Stroke</span>}
+            </div>
           </Field>
           <Field label="Displacement (cc)" hint="Volume silinder kerja mesin">
             <InputWithNotice value={cc} onChange={setCc} step={5} warn={450} danger={550} />
           </Field>
           <Field label="Exhaust Duration (°)" hint="Lama port buang terbuka dalam satu siklus">
-            <InputWithNotice value={exDur} onChange={setExDur} step={0.5} warn={210} danger={220} />
+            <div style={{ position: 'relative' }}>
+              <input
+                type="number" value={synced ? effExDur.toFixed(1) : exDur} disabled={synced}
+                onChange={e => setExDur(e.target.value)} step={0.5}
+                style={{
+                  width: '100%', padding: '7px 10px', boxSizing: 'border-box',
+                  border: `1px solid ${synced ? '#86efac' : '#d1d5db'}`, borderRadius: 8,
+                  fontSize: 14, fontFamily: 'system-ui', outline: 'none',
+                  background: synced ? '#f0fdf4' : '#fff', color: '#111',
+                  paddingRight: synced ? 110 : undefined,
+                }}
+              />
+              {synced && <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#15803d', pointerEvents: 'none' }}>🔗 Port & Stroke</span>}
+            </div>
           </Field>
           <Field label="Diameter Port (mm)" hint="Diameter dalam lubang buang di silinder">
             <InputWithNotice value={dPort} onChange={setDPort} step={0.5} warn={55} danger={65} />
@@ -465,9 +571,13 @@ function ExhaustTab() {
               { value: '3', label: '3 tahap' },
             ]} />
           </Field>
+          <Field label="Oktan Bahan Bakar" hint="Mempengaruhi SOS gas buang dan timing optimal">
+            <InputWithNotice value={octane} onChange={setOctane} step={1} min={80} max={102} warn={98} danger={102} />
+          </Field>
         </Grid>
         <Field label="Speed of Sound (m/s)" hint="Kecepatan rambat gelombang tekanan — naik seiring suhu gas, default 345 m/s @ 20°C">
           <InputWithNotice value={sos} onChange={setSos} step={1} warn={400} danger={450} />
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>{sosHint}</div>
         </Field>
         <CalcBtn onClick={calc} />
       </Card>
@@ -525,6 +635,84 @@ function ExhaustTab() {
                 </div>
               </div>
             </Card>
+
+            {/* Gas Flow Analysis */}
+            {(() => {
+              const portForGf = masterParams
+                ? { dur_ex: masterParams.dur_ex ?? effExDur, dur_tr: masterParams.dur_tr ?? effExDur - 26, blowdown: masterParams.blowdown ?? 26, cr: masterParams.cr ?? 12, rpm: masterParams.rpm ?? effRpm }
+                : { dur_ex: effExDur, dur_tr: effExDur - 26, blowdown: 26, cr: 12, rpm: effRpm }
+              const gf = calcGasFlow(portForGf, result, p(octane))
+              return (
+                <Card title="Analisis Gas Flow & Aerodinamika">
+                  <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>Kondisi gas buang</div>
+                  <MetricGrid>
+                    <Metric label="Suhu gas buang" value={gf.T_exhaust_C} unit="°C" />
+                    <Metric label="SOS gas panas" value={gf.SOS_exhaust} unit="m/s" />
+                    <Metric label="Kecepatan di port" value={gf.v_port_ms} unit="m/s" />
+                    <Metric label="Mass flow rate" value={gf.mass_flow_gs} unit="g/s" />
+                  </MetricGrid>
+                  <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8, marginTop: 12 }}>Efisiensi sistem</div>
+                  <MetricGrid>
+                    <Metric label="Scavenging efficiency" value={gf.scav_eff} unit="%"
+                      status={gf.scav_eff > 85 ? 'ok' : gf.scav_eff > 70 ? 'warn' : 'danger'} />
+                    <Metric label="Estimasi fuel loss" value={gf.fuel_loss} unit="%"
+                      status={gf.fuel_loss < 25 ? 'ok' : gf.fuel_loss < 35 ? 'warn' : 'danger'} />
+                    <Metric label="RPM optimal pipa" value={gf.RPM_optimal} unit="RPM" />
+                    <Metric label="Pulse match" value={gf.pulse_match}
+                      status={gf.pulse_match === 'OPTIMAL' ? 'ok' : gf.pulse_match === 'MENDEKATI' ? 'warn' : 'danger'} />
+                  </MetricGrid>
+                  <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8, marginTop: 12 }}>Mach number & tekanan per segmen</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f9fafb' }}>
+                          {['Segmen', 'Mach (M)', 'Tekanan (bar)', 'Status'].map(h => (
+                            <th key={h} style={{ padding: '6px 10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb', color: '#6b7280', fontWeight: 500 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          { name: 'Header',  M: gf.M_header,  P: gf.P_header,  col: '#c75e1a' },
+                          { name: 'Belly',   M: gf.M_belly,   P: gf.P_belly,   col: '#15803d' },
+                          { name: 'Stinger', M: gf.M_stinger, P: gf.P_stinger, col: '#6b7280' },
+                        ].map(row => (
+                          <tr key={row.name} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '6px 10px' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: 2, background: row.col, display: 'inline-block' }} />{row.name}
+                              </span>
+                            </td>
+                            <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>
+                              {row.M}
+                              {parseFloat(row.M) > 0.8 && <span style={{ color: '#b91c1c', marginLeft: 4 }}>⚠ near choked</span>}
+                            </td>
+                            <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{row.P}</td>
+                            <td style={{ padding: '6px 10px' }}>
+                              {parseFloat(row.M) > 0.8 ? <Badge text="Turbulensi tinggi" type="danger" />
+                                : parseFloat(row.M) > 0.5 ? <Badge text="Aliran baik" type="warn" />
+                                : <Badge text="Aliran laminar" type="ok" />}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ marginTop: 12, padding: '8px 12px', background: '#f9fafb', borderRadius: 8, fontSize: 12 }}>
+                    <span style={{ color: '#6b7280' }}>Risiko turbulensi diffuser: </span>
+                    <Badge
+                      text={`${gf.eddy_risk} — sudut ${gf.diffuser_ang}°`}
+                      type={gf.eddy_risk === 'RENDAH' ? 'ok' : gf.eddy_risk === 'SEDANG' ? 'warn' : 'danger'}
+                    />
+                    {gf.eddy_risk === 'TINGGI' && (
+                      <div style={{ marginTop: 4, color: '#b91c1c', fontSize: 11 }}>
+                        Sudut diffuser &gt;8° menyebabkan eddying — kurangi tahap atau gunakan 3-stage diffuser (ref: Graham Bell Fig. 3.14)
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              )
+            })()}
 
             {/* Baris 2: Slider + 3D — side by side */}
             <div style={{
@@ -622,7 +810,7 @@ function ExhaustTab() {
 }
 
 // ─── Modul 2: Port & Stroke Tab ──────────────────────────────────────────────
-function PortTab() {
+function PortTab({ onMasterUpdate }) {
   const [bore, setBore] = useState('54')
   const [stroke, setStroke] = useState('54')
   const [conrod, setConrod] = useState('105')
@@ -639,7 +827,15 @@ function PortTab() {
   const calc = () => {
     const f = { bore: p(bore), stroke: p(stroke), conrod: p(conrod), E: p(E), C: p(C), Et: p(Et), Vc: p(Vc), rpm: p(rpm) }
     setFormSnap(f)
-    setResult(calcPortData(f))
+    const res = calcPortData(f)
+    setResult(res)
+    onMasterUpdate?.({
+      bore: f.bore, stroke: f.stroke, rod: f.conrod, E: f.E, C: f.C, Et: f.Et, vc: f.Vc, rpm: f.rpm,
+      dur_ex: res.exDur, dur_tr: res.trDur, blowdown: res.blowdown,
+      cr: res.Cr, vd: res.Vd, piston_speed: res.Vp,
+      epo: res.EPO, epc: res.EPC, tpo: res.TPO, tpc: res.TPC,
+      calculatedAt: Date.now(),
+    })
   }
 
   return (
@@ -792,7 +988,7 @@ function PortTab() {
 }
 
 // ─── Modul 3: ECU Tab ────────────────────────────────────────────────────────
-function ECUTab() {
+function ECUTab({ masterParams }) {
   const [rpmCurrent, setRpmCurrent] = useState('9500')
   const [tps, setTps] = useState('85')
   const [map, setMap] = useState('90')
@@ -803,6 +999,16 @@ function ECUTab() {
   const [exDur, setExDur] = useState('196')
   const [cr, setCr] = useState('12.5')
   const [result, setResult] = useState(null)
+  const [prevMasterEcu, setPrevMasterEcu] = useState(masterParams)
+
+  if (masterParams !== prevMasterEcu) {
+    setPrevMasterEcu(masterParams)
+    if (masterParams) {
+      if (masterParams.rpm)    setRpmPeak(String(masterParams.rpm))
+      if (masterParams.dur_ex) setExDur(masterParams.dur_ex.toFixed(1))
+      if (masterParams.cr)     setCr(masterParams.cr.toFixed(1))
+    }
+  }
 
   const p = v => parseFloat(v) || 0
 
@@ -916,6 +1122,37 @@ function ECUTab() {
               </Card>
             )}
 
+            {masterParams && (() => {
+              const bd = masterParams.blowdown ?? 26
+              const tr = masterParams.dur_tr    ?? 130
+              const crv = masterParams.cr       ?? 12
+              const bf = bd >= 20 && bd <= 40 ? 1.0 : bd < 20 ? 0.7 : 0.85
+              const tf = tr >= 120 && tr <= 142 ? 1.0 : 0.85
+              const cf = crv >= 10 && crv <= 14 ? 1.0 : 0.9
+              const se = Math.round(bf * tf * cf * 100)
+              const fl = Math.round(25 * (1 + (20 - Math.max(20, bd)) / 20))
+              const fl_tc = -(fl - 25) * 0.02
+              const se_fc = (85 - se) * 0.05
+              const oct_tc = (parseFloat(oktan) - 87) * 0.08
+              return (
+                <Card title="Koreksi berbasis gas flow">
+                  <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.9 }}>
+                    <div>Scavenging efficiency: <strong style={{ color: se > 85 ? S.ok : se > 70 ? S.warn : S.danger }}>{se}%</strong></div>
+                    <div>Estimasi fuel loss: <strong>{fl}%</strong></div>
+                    <div>Koreksi timing dari fuel loss:
+                      <strong> {fl_tc > 0 ? '+' : ''}{fl_tc.toFixed(2)} mm BTDC</strong>
+                    </div>
+                    <div>Koreksi fuel dari scavenging:
+                      <strong> {se_fc > 0 ? '+' : ''}{se_fc.toFixed(2)} ms</strong>
+                    </div>
+                    <div>Koreksi timing dari oktan {oktan}:
+                      <strong> {oct_tc > 0 ? '+' : ''}{oct_tc.toFixed(2)} mm BTDC</strong>
+                    </div>
+                  </div>
+                </Card>
+              )
+            })()}
+
             <div style={{ marginTop: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                 Visualisasi 3D Interaktif
@@ -939,6 +1176,7 @@ const TABS = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('exhaust')
+  const [masterParams, setMasterParams] = useState(null)
 
   return (
     <div style={{
@@ -969,9 +1207,9 @@ export default function App() {
         ))}
       </div>
 
-      {activeTab === 'exhaust' && <ExhaustTab />}
-      {activeTab === 'port' && <PortTab />}
-      {activeTab === 'ecu' && <ECUTab />}
+      {activeTab === 'exhaust' && <ExhaustTab masterParams={masterParams} />}
+      {activeTab === 'port' && <PortTab onMasterUpdate={setMasterParams} />}
+      {activeTab === 'ecu' && <ECUTab masterParams={masterParams} />}
 
       <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 16 }}>
         Ref: Graham Bell 'Performance Tuning in a Weekend' · 2s-tools.abdurrahman.sbs

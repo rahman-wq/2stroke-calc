@@ -178,24 +178,40 @@ function ExhaustSegment({ r1, r2, length, color, posX, infoLabel, clip, selected
   )
 }
 
-const PARTICLE_COUNT = 8
-const initParticles = () =>
-  Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
-    x: -3 + i * 0.78,
-    speed: 0.022 + (i % 3) * 0.006,
-  }))
+const GAS_COLORS = ['#ff4400', '#ff8800', '#ffaa00', '#ffcc44', '#88ccff']
+const GAS_SIZES  = [0.04, 0.06, 0.10, 0.07, 0.03]
+const GAS_SPEEDS = [0.025, 0.018, 0.010, 0.018, 0.030]
+const PARTICLE_COUNT = 10
 
-function GasParticles({ active }) {
+function GasParticles({ active, lens }) {
   const groupRef = useRef()
-  const pts = useRef(initParticles())
+  const pts = useRef(
+    Array.from({ length: PARTICLE_COUNT }, (_, i) => ({ x: -3 + (i / PARTICLE_COUNT) * 6 }))
+  )
+
+  const getSegFor = (x, bounds) => {
+    for (let i = 0; i < 4; i++) { if (x < bounds[i + 1]) return i }
+    return 4
+  }
 
   useFrame(() => {
     if (!active || !groupRef.current) return
+    const bounds = [-3]
+    let cur = -3
+    const src = lens ?? [1.2, 1.2, 1.2, 1.2, 1.2]
+    src.forEach(l => { cur += l; bounds.push(cur) })
+
     groupRef.current.children.forEach((mesh, i) => {
-      pts.current[i].x += pts.current[i].speed
-      if (pts.current[i].x > 3.1) pts.current[i].x = -3.0
+      const seg = getSegFor(pts.current[i].x, bounds)
+      pts.current[i].x += GAS_SPEEDS[seg]
+      if (pts.current[i].x > 3) pts.current[i].x = -3
       mesh.position.x = pts.current[i].x
       mesh.position.y = Math.sin(pts.current[i].x * 3.5) * 0.06
+      mesh.scale.setScalar(GAS_SIZES[seg] / 0.05)
+      if (mesh.material) {
+        mesh.material.color.set(GAS_COLORS[seg])
+        mesh.material.emissive.set(GAS_COLORS[seg])
+      }
     })
   })
 
@@ -205,10 +221,33 @@ function GasParticles({ active }) {
       {Array.from({ length: PARTICLE_COUNT }, (_, i) => (
         <mesh key={i}>
           <sphereGeometry args={[0.05, 8, 8]} />
-          <meshStandardMaterial color="#ff6600" emissive="#ff3300" emissiveIntensity={0.9} />
+          <meshStandardMaterial color={GAS_COLORS[i % 5]} emissive={GAS_COLORS[i % 5]} emissiveIntensity={0.9} />
         </mesh>
       ))}
     </group>
+  )
+}
+
+function PulseWave({ active }) {
+  const ringRef = useRef()
+  const progress = useRef(0.5)
+
+  useFrame(() => {
+    if (!active || !ringRef.current) return
+    progress.current -= 0.012
+    if (progress.current < 0) progress.current = 1.0
+    ringRef.current.position.x = (progress.current - 0.5) * 6
+    const t = progress.current
+    const opacity = t < 0.1 ? t * 10 : t > 0.9 ? (1 - t) * 10 : 1
+    if (ringRef.current.material) ringRef.current.material.opacity = opacity * 0.6
+  })
+
+  if (!active) return null
+  return (
+    <mesh ref={ringRef} rotation={[0, Math.PI / 2, 0]}>
+      <torusGeometry args={[0.12, 0.015, 8, 32]} />
+      <meshStandardMaterial color="#88ccff" emissive="#4499ff" emissiveIntensity={0.8} transparent opacity={0.6} />
+    </mesh>
   )
 }
 
@@ -372,7 +411,8 @@ function ExhaustScene({ data, showLabels, showFlow, crossSection, crossValue, se
           />
         ) : null
       )}
-      <GasParticles active={showFlow} />
+      <GasParticles active={showFlow} lens={lens} />
+      <PulseWave active={showFlow} />
       {onDimChange && boundaries.map((bx, i) =>
         lens[i] > 0.005 && lens[i + 1] > 0.005 ? (
           <DragHandle
