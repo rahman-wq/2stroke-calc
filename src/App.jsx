@@ -1,6 +1,19 @@
 import { useState, useEffect } from 'react'
 import { ExhaustViewer, PortViewer, ECUViewer } from './components/Viewer3D'
 
+// ─── mobile hook ─────────────────────────────────────────────────────────────
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' && window.innerWidth < 640
+  )
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 640)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
+  return isMobile
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 const fmt = (n, dec = 1) => {
   if (n === null || n === undefined) return '—'
@@ -305,11 +318,15 @@ function Badge({ text, type = 'ok' }) {
 
 function Field({ label, hint, children }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <label style={{ fontSize: 13, color: '#374151', fontWeight: 500, lineHeight: 1.4, wordBreak: 'keep-all' }}>
         {label}
-        {hint && <span style={{ fontWeight: 400, color: '#9ca3af', marginLeft: 6, fontSize: 11 }}>{hint}</span>}
       </label>
+      {hint && (
+        <span style={{ fontSize: 11, color: '#9ca3af', lineHeight: 1.4, marginBottom: 2 }}>
+          {hint}
+        </span>
+      )}
       {children}
     </div>
   )
@@ -318,12 +335,19 @@ function Field({ label, hint, children }) {
 function NumInput({ value, onChange, step = 1, min, max }) {
   return (
     <input
-      type="number" value={value} step={step} min={min} max={max}
+      type="number"
+      inputMode="decimal"
+      value={value}
+      step={step}
+      min={min}
+      max={max}
       onChange={e => onChange(e.target.value)}
       style={{
-        width: '100%', padding: '7px 10px', border: '1px solid #d1d5db',
-        borderRadius: 8, fontSize: 14, boxSizing: 'border-box',
-        fontFamily: 'system-ui', outline: 'none',
+        width: '100%', padding: '10px 12px', border: '1px solid #d1d5db',
+        borderRadius: 8, fontSize: 15, boxSizing: 'border-box',
+        fontFamily: 'system-ui', outline: 'none', background: '#fff',
+        color: '#111', minHeight: 44,
+        WebkitAppearance: 'none', MozAppearance: 'textfield',
       }}
     />
   )
@@ -342,14 +366,20 @@ function InputWithNotice({ value, onChange, step, min, max, warn, danger }) {
   return (
     <div>
       <input
-        type="number" value={value} step={step} min={min} max={max}
+        type="number"
+        inputMode="decimal"
+        value={value}
+        step={step}
+        min={min}
+        max={max}
         onChange={e => onChange(e.target.value)}
         style={{
-          width: '100%', padding: '7px 10px', boxSizing: 'border-box',
+          width: '100%', padding: '10px 12px', boxSizing: 'border-box',
           border: `1px solid ${borderColor}`,
-          borderRadius: 8, fontSize: 14, fontFamily: 'system-ui', outline: 'none',
+          borderRadius: 8, fontSize: 15, fontFamily: 'system-ui', outline: 'none',
           background: isDanger ? '#fff1f1' : isWarn ? '#fffbeb' : '#fff',
-          color: '#111',
+          color: '#111', minHeight: 44,
+          WebkitAppearance: 'none', MozAppearance: 'textfield',
         }}
       />
       {notice && (
@@ -405,16 +435,31 @@ function Card({ title, children, accent }) {
 }
 
 function Grid({ cols = 2, children }) {
+  const isMobile = useIsMobile()
+  const actualCols = isMobile ? Math.min(cols, 2) : cols
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 10 }}>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: `repeat(${actualCols}, 1fr)`,
+      gap: isMobile ? 10 : 12,
+      marginBottom: isMobile ? 10 : 12,
+    }}>
       {children}
     </div>
   )
 }
 
 function MetricGrid({ children }) {
+  const isMobile = useIsMobile()
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: isMobile
+        ? 'repeat(2, 1fr)'
+        : 'repeat(auto-fit, minmax(110px, 1fr))',
+      gap: 8,
+      marginBottom: 12,
+    }}>
       {children}
     </div>
   )
@@ -498,6 +543,7 @@ function RPMImpactDisplay({ dims, targetTotal, rpmNum }) {
 // ─── Modul 1: Exhaust Tab ────────────────────────────────────────────────────
 function ExhaustTab({ form, setForm, result, setResult, dims, setDims, isModified, setIsModified, masterParams, onDone }) {
   const [syncOverride, setSyncOverride] = useState(false)
+  const isMobile = useIsMobile()
 
   useEffect(() => { setSyncOverride(false) }, [masterParams])
 
@@ -648,8 +694,6 @@ function ExhaustTab({ form, setForm, result, setResult, dims, setDims, isModifie
           ? [dims.header, dims.diffuser, Math.max(dims.belly, 0), dims.baffle, dims.stinger]
           : [L_header, L_diffuser, Math.max(L_belly, 0), L_baffle, L_stinger]
         const totalVis = segs.reduce((a, b) => a + b, 0)
-
-        const isMobile = typeof window !== 'undefined' && window.innerWidth < 640
 
         return (
           <>
@@ -836,7 +880,9 @@ function ExhaustTab({ form, setForm, result, setResult, dims, setDims, isModifie
                   <span style={{ fontWeight: 600 }}>Visualisasi 3D</span>
                   <span style={{ color: '#9ca3af' }}>— drag rotate, scroll zoom</span>
                 </div>
-                <ExhaustViewer data={result} dims={dims} onDimChange={updateDimProportional} />
+                <div style={{ borderRadius: 12, overflow: 'hidden', height: isMobile ? 320 : 460, background: '#e8e8f0' }}>
+                  <ExhaustViewer data={result} dims={dims} onDimChange={updateDimProportional} />
+                </div>
                 <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4, textAlign: 'center' }}>
                   💡 Drag handle putih antar segmen untuk ubah dimensi
                 </div>
@@ -868,10 +914,11 @@ function ExhaustTab({ form, setForm, result, setResult, dims, setDims, isModifie
 
 // ─── AutoRecommendPanel ──────────────────────────────────────────────────────
 function AutoRecommendPanel({ rec, onApply }) {
+  const isMobile = useIsMobile()
   if (!rec) return null
   return (
     <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 12, padding: '16px 18px', marginBottom: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 8 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#15803d' }}>🎯 Rekomendasi Otomatis</div>
           <div style={{ fontSize: 11, color: '#16a34a', marginTop: 2 }}>{rec.label} — preset terdekat: {rec.nearestPreset}cc</div>
@@ -881,7 +928,7 @@ function AutoRecommendPanel({ rec, onApply }) {
           borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0,
         }}>Terapkan Semua</button>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)', gap: 10 }}>
         <div style={{ background: '#fff', borderRadius: 8, padding: '10px 12px', border: '1px solid #bbf7d0' }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: '#15803d', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>① Geometri Dasar</div>
           <div style={{ fontSize: 12, lineHeight: 1.9, color: '#374151' }}>
@@ -917,6 +964,7 @@ function AutoRecommendPanel({ rec, onApply }) {
 
 // ─── Modul 2: Port & Stroke Tab ──────────────────────────────────────────────
 function PortTab({ form, setForm, result, setResult, setMasterParams, setHasResult }) {
+  const isMobile = useIsMobile()
 
   const p = v => parseFloat(v) || 0
   const set = key => val => setForm(f => ({ ...f, [key]: val }))
@@ -977,7 +1025,7 @@ function PortTab({ form, setForm, result, setResult, setMasterParams, setHasResu
             ]} />
           </Field>
         </Grid>
-        <Grid cols={3}>
+        <Grid cols={isMobile ? 2 : 3}>
           <Field label="Bore (mm)" hint="Diameter dalam silinder">
             <InputWithNotice value={form.bore} onChange={set('bore')} step={0.5} warn={90} danger={105} />
           </Field>
@@ -987,6 +1035,8 @@ function PortTab({ form, setForm, result, setResult, setMasterParams, setHasResu
           <Field label="Con Rod (mm)" hint="Jarak center-to-center pena piston ke kruk as">
             <InputWithNotice value={form.conrod} onChange={set('conrod')} step={0.5} warn={220} danger={260} />
           </Field>
+        </Grid>
+        <Grid cols={isMobile ? 1 : 3}>
           <Field label="E — tinggi exhaust port dari bibir atas barrel (mm)" hint="Jarak dari tepi atas barrel ke puncak lubang exhaust port">
             <NumInput value={form.E} onChange={set('E')} step={0.5} />
             {p(form.conrod) > 0 && p(form.stroke) > 0 && (() => {
@@ -1023,6 +1073,8 @@ function PortTab({ form, setForm, result, setResult, setMasterParams, setHasResu
               )
             })()}
           </Field>
+        </Grid>
+        <Grid cols={isMobile ? 2 : 3}>
           <Field label="Vc clearance volume (cc)" hint="Volume ruang bakar saat piston di TMA">
             <NumInput value={form.Vc} onChange={set('Vc')} step={0.1} />
           </Field>
@@ -1163,7 +1215,9 @@ function PortTab({ form, setForm, result, setResult, setMasterParams, setHasResu
                 Visualisasi 3D Interaktif
                 <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>— drag untuk rotate, scroll untuk zoom</span>
               </div>
-              <PortViewer data={result} form={result._formSnap} />
+              <div style={{ borderRadius: 12, overflow: 'hidden', height: isMobile ? 320 : 460, background: '#e8e8f0' }}>
+                <PortViewer data={result} form={result._formSnap} />
+              </div>
             </div>
           </>
         )
@@ -1341,6 +1395,7 @@ const TABS = [
 ]
 
 export default function App() {
+  const isMobile = useIsMobile()
   const [activeTab, setActiveTab] = useState('port')
   const [masterParams, setMasterParams] = useState(null)
   const [hasResult, setHasResult] = useState({ port: false, exhaust: false, ecu: false })
@@ -1372,6 +1427,7 @@ export default function App() {
       ...f,
       rpm: String(masterParams.rpm ?? f.rpm),
       dur: masterParams.dur_ex != null ? masterParams.dur_ex.toFixed(1) : f.dur,
+      cc: masterParams.vd != null ? String(Math.round(masterParams.vd)) : f.cc,
     }))
     setEcuForm(f => ({
       ...f,
@@ -1384,9 +1440,11 @@ export default function App() {
 
   return (
     <div style={{
-      maxWidth: 1100, margin: '0 auto', padding: '1.5rem 1rem',
+      maxWidth: 720, margin: '0 auto',
+      padding: isMobile ? '1rem 0.75rem' : '1.5rem 1rem',
       fontFamily: 'system-ui, sans-serif', color: '#111827',
     }}>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } }`}</style>
       <div style={{ marginBottom: 16, textAlign: 'center' }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: S.accent, letterSpacing: -0.5 }}>
           2-Stroke Calc
@@ -1399,29 +1457,34 @@ export default function App() {
       {/* Workflow banner */}
       <div style={{
         background: '#fdf0e8', border: '1px solid #e8a070', borderRadius: 8,
-        padding: '8px 14px', marginBottom: 8, fontSize: 12, color: '#92400e',
-        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        padding: '8px 12px', marginBottom: 8, fontSize: isMobile ? 11 : 12, color: '#92400e',
+        display: 'flex', flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'flex-start' : 'center',
+        gap: isMobile ? 4 : 8, flexWrap: 'wrap',
       }}>
         <span style={{ fontWeight: 600 }}>Alur input data:</span>
-        <span>① Isi Port &amp; Stroke terlebih dahulu</span>
-        <span style={{ color: S.accent }}>→</span>
-        <span>② Hitung Knalpot optimal</span>
-        <span style={{ color: S.accent }}>→</span>
-        <span>③ Evaluasi dengan ECU Optimizer</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+          <span>① Port &amp; Stroke</span>
+          <span style={{ color: S.accent }}>→</span>
+          <span>② Knalpot</span>
+          <span style={{ color: S.accent }}>→</span>
+          <span>③ ECU Optimizer</span>
+        </div>
       </div>
 
       {/* Tab bar */}
       <div style={{
         display: 'flex', borderBottom: '2px solid #e5e7eb', marginBottom: 20, gap: 4,
+        overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
       }}>
         {TABS.map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
-            padding: '9px 16px', border: 'none', background: 'none',
+            padding: isMobile ? '8px 12px' : '9px 16px', border: 'none', background: 'none',
             cursor: 'pointer', fontSize: 13, fontWeight: activeTab === t.id ? 700 : 500,
             color: activeTab === t.id ? S.accent : '#6b7280',
             borderBottom: activeTab === t.id ? `2px solid ${S.accent}` : '2px solid transparent',
             marginBottom: -2, borderRadius: '4px 4px 0 0', transition: 'color 0.15s',
-            display: 'inline-flex', alignItems: 'center',
+            display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap', flexShrink: 0,
           }}>
             <span style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -1435,6 +1498,13 @@ export default function App() {
               <span style={{
                 width: 6, height: 6, borderRadius: '50%',
                 background: '#15803d', marginLeft: 6, display: 'inline-block', flexShrink: 0,
+              }} />
+            )}
+            {t.id === 'exhaust' && masterParams && !hasResult.exhaust && (
+              <span style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: '#f59e0b', marginLeft: 6, display: 'inline-block', flexShrink: 0,
+                animation: 'pulse 1s infinite',
               }} />
             )}
           </button>
