@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ExhaustViewer, PortViewer, ECUViewer } from './components/Viewer3D'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -496,37 +496,23 @@ function RPMImpactDisplay({ dims, targetTotal, rpmNum }) {
 }
 
 // ─── Modul 1: Exhaust Tab ────────────────────────────────────────────────────
-function ExhaustTab({ masterParams, onDone }) {
-  const [rpm, setRpm] = useState('11000')
-  const [cc, setCc] = useState('125')
-  const [exDur, setExDur] = useState('196')
-  const [dPort, setDPort] = useState('40')
-  const [type, setType] = useState('roadrace')
-  const [diffStages, setDiffStages] = useState('1')
-  const [sos, setSos] = useState('345')
-  const [result, setResult] = useState(null)
-  const [dims, setDims] = useState(null)
-  const [isModified, setIsModified] = useState(false)
+function ExhaustTab({ form, setForm, result, setResult, dims, setDims, isModified, setIsModified, masterParams, onDone }) {
   const [syncOverride, setSyncOverride] = useState(false)
-  const [prevMaster, setPrevMaster] = useState(masterParams)
 
-  if (masterParams !== prevMaster) {
-    setPrevMaster(masterParams)
-    setSyncOverride(false)
-  }
+  useEffect(() => { setSyncOverride(false) }, [masterParams])
 
   const p = v => parseFloat(v) || 0
 
   const synced   = !!masterParams && !syncOverride
-  const effRpm   = synced ? masterParams.rpm    : p(rpm)
-  const effExDur = synced ? (masterParams.dur_ex ?? p(exDur)) : p(exDur)
+  const effRpm   = synced ? masterParams.rpm    : p(form.rpm)
+  const effExDur = synced ? (masterParams.dur_ex ?? p(form.dur)) : p(form.dur)
 
   const calc = () => {
     const res = calcExhaustData({
-      rpm: effRpm, cc: p(cc), exDur: effExDur, dPort: p(dPort),
-      type, diffStages: parseInt(diffStages), sos: p(sos),
+      rpm: effRpm, cc: p(form.cc), exDur: effExDur, dPort: p(form.dport),
+      type: form.type, diffStages: parseInt(form.stages), sos: p(form.sos),
     })
-    setResult({ ...res, dPort: p(dPort) })
+    setResult({ ...res, dPort: p(form.dport) })
     setDims({
       header: res.L_header,
       diffuser: res.L_diffuser,
@@ -596,8 +582,8 @@ function ExhaustTab({ masterParams, onDone }) {
           <Field label="RPM Target" hint="Puncak RPM yang ingin dicapai mesin">
             <div style={{ position: 'relative' }}>
               <input
-                type="number" value={synced ? effRpm : rpm} disabled={synced}
-                onChange={e => setRpm(e.target.value)}
+                type="number" value={synced ? effRpm : form.rpm} disabled={synced}
+                onChange={e => setForm(f => ({...f, rpm: e.target.value}))}
                 style={{
                   width: '100%', padding: '7px 10px', boxSizing: 'border-box',
                   border: `1px solid ${synced ? '#86efac' : '#d1d5db'}`, borderRadius: 8,
@@ -610,13 +596,13 @@ function ExhaustTab({ masterParams, onDone }) {
             </div>
           </Field>
           <Field label="Displacement (cc)" hint="Volume silinder kerja mesin">
-            <InputWithNotice value={cc} onChange={setCc} step={5} warn={450} danger={550} />
+            <InputWithNotice value={form.cc} onChange={v => setForm(f => ({...f, cc: v}))} step={5} warn={450} danger={550} />
           </Field>
           <Field label="Exhaust Duration (°)" hint="Lama port buang terbuka dalam satu siklus">
             <div style={{ position: 'relative' }}>
               <input
-                type="number" value={synced ? effExDur.toFixed(1) : exDur} disabled={synced}
-                onChange={e => setExDur(e.target.value)} step={0.5}
+                type="number" value={synced ? effExDur.toFixed(1) : form.dur} disabled={synced}
+                onChange={e => setForm(f => ({...f, dur: e.target.value}))} step={0.5}
                 style={{
                   width: '100%', padding: '7px 10px', boxSizing: 'border-box',
                   border: `1px solid ${synced ? '#86efac' : '#d1d5db'}`, borderRadius: 8,
@@ -629,17 +615,17 @@ function ExhaustTab({ masterParams, onDone }) {
             </div>
           </Field>
           <Field label="Diameter Port (mm)" hint="Diameter dalam lubang buang di silinder">
-            <InputWithNotice value={dPort} onChange={setDPort} step={0.5} warn={55} danger={65} />
+            <InputWithNotice value={form.dport} onChange={v => setForm(f => ({...f, dport: v}))} step={0.5} warn={55} danger={65} />
           </Field>
           <Field label="Tipe Mesin" hint="Karakter penggunaan mesin — menentukan sudut diffuser dan baffle">
-            <Select value={type} onChange={setType} options={[
+            <Select value={form.type} onChange={v => setForm(f => ({...f, type: v}))} options={[
               { value: 'roadrace', label: 'Road Race' },
               { value: 'motocross', label: 'Motocross' },
               { value: 'enduro', label: 'Enduro' },
             ]} />
           </Field>
           <Field label="Tahap Diffuser" hint="Makin banyak tahap, power band makin lebar dan halus">
-            <Select value={diffStages} onChange={setDiffStages} options={[
+            <Select value={form.stages} onChange={v => setForm(f => ({...f, stages: v}))} options={[
               { value: '1', label: '1 tahap' },
               { value: '2', label: '2 tahap' },
               { value: '3', label: '3 tahap' },
@@ -647,7 +633,7 @@ function ExhaustTab({ masterParams, onDone }) {
           </Field>
         </Grid>
         <Field label="Speed of Sound (m/s)" hint="Kecepatan rambat gelombang tekanan — naik seiring suhu gas, default 345 m/s @ 20°C">
-          <InputWithNotice value={sos} onChange={setSos} step={1} warn={400} danger={450} />
+          <InputWithNotice value={form.sos} onChange={v => setForm(f => ({...f, sos: v}))} step={1} warn={400} danger={450} />
           <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>{sosHint}</div>
         </Field>
         <CalcBtn onClick={calc} />
@@ -841,7 +827,7 @@ function ExhaustTab({ masterParams, onDone }) {
                     onChange={v => updateDimProportional(key, v)}
                   />
                 ))}
-                {dims && <RPMImpactDisplay dims={dims} targetTotal={result.L_total} rpmNum={p(rpm)} />}
+                {dims && <RPMImpactDisplay dims={dims} targetTotal={result.L_total} rpmNum={p(form.rpm)} />}
               </div>
 
               {/* Kolom kanan: Visualisasi 3D */}
@@ -930,14 +916,7 @@ function AutoRecommendPanel({ rec, onApply }) {
 }
 
 // ─── Modul 2: Port & Stroke Tab ──────────────────────────────────────────────
-function PortTab({ onMasterUpdate, onDone }) {
-  const [form, setForm] = useState({
-    bore: '54', stroke: '54', conrod: '105',
-    E: '127.3', C: '0', Et: '133.9', Vc: '8.5',
-    rpm: '11000', octane: '92', cc: '125', engineType: 'roadrace',
-  })
-  const [result, setResult] = useState(null)
-  const [formSnap, setFormSnap] = useState(null)
+function PortTab({ form, setForm, result, setResult, setMasterParams, setHasResult }) {
 
   const p = v => parseFloat(v) || 0
   const set = key => val => setForm(f => ({ ...f, [key]: val }))
@@ -961,16 +940,15 @@ function PortTab({ onMasterUpdate, onDone }) {
       E_from_top: p(form.E), C: p(form.C), Et_from_top: p(form.Et),
       vc: p(form.Vc), rpm: p(form.rpm),
     }
-    // formSnap keeps keys Viewer3D expects: conrod, E, Et
-    setFormSnap({
+    const snap = {
       bore: f.bore, stroke: f.stroke, conrod: f.rod,
       E: f.E_from_top, Et: f.Et_from_top, C: f.C,
       Vc: f.vc, rpm: f.rpm, octane: p(form.octane),
-    })
+    }
     const res = calcPortData(f)
-    setResult(res)
+    setResult(res.error ? res : { ...res, _formSnap: snap })
     if (!res.error) {
-      onMasterUpdate?.({
+      setMasterParams({
         bore: f.bore, stroke: f.stroke, rod: f.rod, vc: f.vc, rpm: f.rpm,
         octane: p(form.octane),
         dur_ex: res.dur_ex, dur_tr: res.dur_tr, blowdown: res.blowdown,
@@ -978,7 +956,7 @@ function PortTab({ onMasterUpdate, onDone }) {
         epo: res.epo, epc: res.epc, tpo: res.tpo, tpc: res.tpc,
         calculatedAt: Date.now(),
       })
-      onDone?.()
+      setHasResult(prev => ({ ...prev, port: true }))
     }
   }
 
@@ -1185,7 +1163,7 @@ function PortTab({ onMasterUpdate, onDone }) {
                 Visualisasi 3D Interaktif
                 <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>— drag untuk rotate, scroll untuk zoom</span>
               </div>
-              <PortViewer data={result} form={formSnap} />
+              <PortViewer data={result} form={result._formSnap} />
             </div>
           </>
         )
@@ -1195,36 +1173,15 @@ function PortTab({ onMasterUpdate, onDone }) {
 }
 
 // ─── Modul 3: ECU Tab ────────────────────────────────────────────────────────
-function ECUTab({ masterParams, onDone }) {
-  const [rpmCurrent, setRpmCurrent] = useState('9500')
-  const [tps, setTps] = useState('85')
-  const [map, setMap] = useState('90')
-  const [temp, setTemp] = useState('75')
-  const [lambda, setLambda] = useState('0.95')
-  const [oktan, setOktan] = useState('92')
-  const [rpmPeak, setRpmPeak] = useState('11000')
-  const [exDur, setExDur] = useState('196')
-  const [cr, setCr] = useState('12.5')
-  const [result, setResult] = useState(null)
-  const [prevMasterEcu, setPrevMasterEcu] = useState(masterParams)
-
-  if (masterParams !== prevMasterEcu) {
-    setPrevMasterEcu(masterParams)
-    if (masterParams) {
-      if (masterParams.rpm)    setRpmPeak(String(masterParams.rpm))
-      if (masterParams.dur_ex) setExDur(masterParams.dur_ex.toFixed(1))
-      if (masterParams.cr)     setCr(masterParams.cr.toFixed(1))
-      if (masterParams.octane) setOktan(String(masterParams.octane))
-    }
-  }
+function ECUTab({ form, setForm, result, setResult, masterParams, onDone }) {
 
   const p = v => parseFloat(v) || 0
 
   const calc = () => {
     setResult(calcECUData({
-      rpmCurrent: p(rpmCurrent), tps: p(tps), map: p(map),
-      temp: p(temp), lambda: p(lambda), oktan: p(oktan),
-      rpmPeak: p(rpmPeak), exDur: p(exDur), cr: p(cr),
+      rpmCurrent: p(form.rpm), tps: p(form.tps), map: p(form.map_kpa),
+      temp: p(form.temp), lambda: p(form.lambda), oktan: p(form.oct),
+      rpmPeak: p(form.peakrpm), exDur: p(form.exdur), cr: p(form.cr),
     }))
     onDone?.()
   }
@@ -1242,22 +1199,22 @@ function ECUTab({ masterParams, onDone }) {
       <Card title="Sensor Real-Time" accent>
         <Grid cols={2}>
           <Field label="RPM Saat Ini" hint="Putaran mesin aktual yang sedang dioperasikan">
-            <NumInput value={rpmCurrent} onChange={setRpmCurrent} step={100} />
+            <NumInput value={form.rpm} onChange={v => setForm(f => ({...f, rpm: v}))} step={100} />
           </Field>
           <Field label="TPS (%)" hint="Posisi bukaan gas — 0 tutup penuh, 100 buka penuh">
-            <NumInput value={tps} onChange={setTps} step={1} min={0} max={100} />
+            <NumInput value={form.tps} onChange={v => setForm(f => ({...f, tps: v}))} step={1} min={0} max={100} />
           </Field>
           <Field label="MAP (kPa)" hint="Tekanan udara di intake manifold — indikator beban mesin">
-            <NumInput value={map} onChange={setMap} step={1} />
+            <NumInput value={form.map_kpa} onChange={v => setForm(f => ({...f, map_kpa: v}))} step={1} />
           </Field>
           <Field label="Suhu Mesin (°C)" hint="Suhu operasi — mempengaruhi timing dan risiko detonasi">
-            <InputWithNotice value={temp} onChange={setTemp} step={1} warn={90} danger={105} />
+            <InputWithNotice value={form.temp} onChange={v => setForm(f => ({...f, temp: v}))} step={1} warn={90} danger={105} />
           </Field>
           <Field label="Lambda λ" hint="Rasio campuran udara-bahan bakar — 1.0 = stoikiometri ideal">
-            <InputWithNotice value={lambda} onChange={setLambda} step={0.01} warn={1.10} danger={1.20} />
+            <InputWithNotice value={form.lambda} onChange={v => setForm(f => ({...f, lambda: v}))} step={0.01} warn={1.10} danger={1.20} />
           </Field>
           <Field label="Oktan Bahan Bakar" hint="Ketahanan bahan bakar terhadap detonasi — makin tinggi makin tahan">
-            <NumInput value={oktan} onChange={setOktan} step={1} />
+            <NumInput value={form.oct} onChange={v => setForm(f => ({...f, oct: v}))} step={1} />
           </Field>
         </Grid>
       </Card>
@@ -1265,13 +1222,13 @@ function ECUTab({ masterParams, onDone }) {
       <Card title="Parameter Mesin">
         <Grid cols={3}>
           <Field label="RPM Power Peak" hint="Sesuaikan dengan hasil kalkulasi modul Knalpot">
-            <NumInput value={rpmPeak} onChange={setRpmPeak} step={100} />
+            <NumInput value={form.peakrpm} onChange={v => setForm(f => ({...f, peakrpm: v}))} step={100} />
           </Field>
           <Field label="Exhaust Duration (°)" hint="Sesuaikan dengan hasil kalkulasi modul Port &amp; Stroke">
-            <NumInput value={exDur} onChange={setExDur} step={0.5} />
+            <NumInput value={form.exdur} onChange={v => setForm(f => ({...f, exdur: v}))} step={0.5} />
           </Field>
           <Field label="Compression Ratio" hint="Sesuaikan dengan hasil kalkulasi modul Port &amp; Stroke">
-            <NumInput value={cr} onChange={setCr} step={0.1} />
+            <NumInput value={form.cr} onChange={v => setForm(f => ({...f, cr: v}))} step={0.1} />
           </Field>
         </Grid>
         <CalcBtn onClick={calc} />
@@ -1342,7 +1299,7 @@ function ECUTab({ masterParams, onDone }) {
               const fl = Math.round(25 * (1 + (20 - Math.max(20, bd)) / 20))
               const fl_tc = -(fl - 25) * 0.02
               const se_fc = (85 - se) * 0.05
-              const oct_tc = (parseFloat(oktan) - 87) * 0.08
+              const oct_tc = (parseFloat(form.oct) - 87) * 0.08
               return (
                 <Card title="Koreksi berbasis gas flow">
                   <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.9 }}>
@@ -1354,7 +1311,7 @@ function ECUTab({ masterParams, onDone }) {
                     <div>Koreksi fuel dari scavenging:
                       <strong> {se_fc > 0 ? '+' : ''}{se_fc.toFixed(2)} ms</strong>
                     </div>
-                    <div>Koreksi timing dari oktan {oktan}:
+                    <div>Koreksi timing dari oktan {form.oct}:
                       <strong> {oct_tc > 0 ? '+' : ''}{oct_tc.toFixed(2)} mm BTDC</strong>
                     </div>
                   </div>
@@ -1388,7 +1345,42 @@ export default function App() {
   const [masterParams, setMasterParams] = useState(null)
   const [hasResult, setHasResult] = useState({ port: false, exhaust: false, ecu: false })
 
-  const markDone = id => setHasResult(prev => ({ ...prev, [id]: true }))
+  const [portForm, setPortForm] = useState({
+    bore: '54', stroke: '54', conrod: '105',
+    E: '127.3', C: '0', Et: '133.9', Vc: '8.5',
+    rpm: '11000', octane: '92', cc: '125', engineType: 'roadrace',
+  })
+  const [portResult, setPortResult] = useState(null)
+
+  const [exhaustForm, setExhaustForm] = useState({
+    rpm: '11000', cc: '125', dur: '196', dport: '40',
+    type: 'roadrace', stages: '1', sos: '345',
+  })
+  const [exhaustResult, setExhaustResult] = useState(null)
+  const [exhaustDims, setExhaustDims] = useState(null)
+  const [isExhaustModified, setIsExhaustModified] = useState(false)
+
+  const [ecuForm, setEcuForm] = useState({
+    rpm: '9500', tps: '85', map_kpa: '90', temp: '75',
+    lambda: '0.95', oct: '92', peakrpm: '11000', exdur: '196', cr: '12.5',
+  })
+  const [ecuResult, setEcuResult] = useState(null)
+
+  useEffect(() => {
+    if (!masterParams) return
+    setExhaustForm(f => ({
+      ...f,
+      rpm: String(masterParams.rpm ?? f.rpm),
+      dur: masterParams.dur_ex != null ? masterParams.dur_ex.toFixed(1) : f.dur,
+    }))
+    setEcuForm(f => ({
+      ...f,
+      peakrpm: String(masterParams.rpm ?? f.peakrpm),
+      exdur: masterParams.dur_ex != null ? masterParams.dur_ex.toFixed(1) : f.exdur,
+      cr: masterParams.cr != null ? masterParams.cr.toFixed(1) : f.cr,
+      oct: String(masterParams.octane ?? f.oct),
+    }))
+  }, [masterParams])
 
   return (
     <div style={{
@@ -1449,9 +1441,15 @@ export default function App() {
         ))}
       </div>
 
-      {activeTab === 'exhaust' && <ExhaustTab masterParams={masterParams} onDone={() => markDone('exhaust')} />}
-      {activeTab === 'port' && <PortTab onMasterUpdate={setMasterParams} onDone={() => markDone('port')} />}
-      {activeTab === 'ecu' && <ECUTab masterParams={masterParams} onDone={() => markDone('ecu')} />}
+      <div style={{ display: activeTab === 'port' ? undefined : 'none' }}>
+        <PortTab form={portForm} setForm={setPortForm} result={portResult} setResult={setPortResult} setMasterParams={setMasterParams} setHasResult={setHasResult} />
+      </div>
+      <div style={{ display: activeTab === 'exhaust' ? undefined : 'none' }}>
+        <ExhaustTab form={exhaustForm} setForm={setExhaustForm} result={exhaustResult} setResult={setExhaustResult} dims={exhaustDims} setDims={setExhaustDims} isModified={isExhaustModified} setIsModified={setIsExhaustModified} masterParams={masterParams} onDone={() => setHasResult(prev => ({ ...prev, exhaust: true }))} />
+      </div>
+      <div style={{ display: activeTab === 'ecu' ? undefined : 'none' }}>
+        <ECUTab form={ecuForm} setForm={setEcuForm} result={ecuResult} setResult={setEcuResult} masterParams={masterParams} onDone={() => setHasResult(prev => ({ ...prev, ecu: true }))} />
+      </div>
 
       <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 16 }}>
         Ref: Graham Bell 'Performance Tuning in a Weekend' · 2s-tools.abdurrahman.sbs
