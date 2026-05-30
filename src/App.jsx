@@ -211,6 +211,66 @@ function calcGasFlow(port, exhaust, octane) {
   }
 }
 
+// ─── recommendation tables ───────────────────────────────────────────────────
+const ENGINE_PRESETS = {
+  50:  { bore: 38, stroke: 44, rod: 85,  rpm: 9500,  octane: 88, label: '50cc — skuter/mini bike' },
+  60:  { bore: 43, stroke: 41, rod: 88,  rpm: 10000, octane: 88, label: '60cc' },
+  65:  { bore: 44, stroke: 43, rod: 90,  rpm: 10500, octane: 90, label: '65cc — motocross junior' },
+  80:  { bore: 47, stroke: 46, rod: 95,  rpm: 11000, octane: 90, label: '80cc — motocross' },
+  100: { bore: 50, stroke: 51, rod: 100, rpm: 10500, octane: 90, label: '100cc' },
+  125: { bore: 54, stroke: 54, rod: 105, rpm: 11000, octane: 92, label: '125cc — paling umum' },
+  150: { bore: 57, stroke: 58, rod: 110, rpm: 10500, octane: 92, label: '150cc' },
+  175: { bore: 62, stroke: 58, rod: 115, rpm: 9500,  octane: 92, label: '175cc' },
+  200: { bore: 65, stroke: 60, rod: 118, rpm: 9000,  octane: 92, label: '200cc' },
+  250: { bore: 70, stroke: 65, rod: 124, rpm: 8500,  octane: 92, label: '250cc — motocross' },
+  300: { bore: 76, stroke: 66, rod: 128, rpm: 8000,  octane: 92, label: '300cc' },
+  350: { bore: 80, stroke: 70, rod: 135, rpm: 7500,  octane: 95, label: '350cc' },
+  500: { bore: 89, stroke: 80, rod: 150, rpm: 7000,  octane: 95, label: '500cc' },
+}
+const E_FACTOR = {
+  6500: 0.30, 7000: 0.32, 7500: 0.32, 8000: 0.33, 8500: 0.33, 9000: 0.34,
+  9500: 0.34, 10000: 0.35, 10500: 0.35, 11000: 0.36, 11500: 0.36,
+  12000: 0.37, 13000: 0.38, 14000: 0.39,
+}
+const ET_OFFSET_FACTOR = 0.08
+const CR_TARGETS = { roadrace: 13.5, motocross: 12.5, enduro: 12.0, trail: 11.0 }
+const PORT_DIAMETER = {
+  50:  { min: 22, max: 26, typical: 24 },
+  80:  { min: 30, max: 32, typical: 31 },
+  100: { min: 34, max: 37, typical: 35 },
+  125: { min: 37, max: 40, typical: 38 },
+  175: { min: 42, max: 46, typical: 44 },
+  250: { min: 44, max: 48, typical: 46 },
+  500: { min: 45, max: 50, typical: 47 },
+}
+
+function getRecommendations(cc, engineType = 'roadrace') {
+  const keys = Object.keys(ENGINE_PRESETS).map(Number).sort((a, b) => a - b)
+  const nearest = keys.reduce((prev, curr) =>
+    Math.abs(curr - cc) < Math.abs(prev - cc) ? curr : prev)
+  const preset = ENGINE_PRESETS[nearest]
+  const cr_target = CR_TARGETS[engineType] ?? 12.5
+  const vd = Math.PI / 4 * preset.bore * preset.bore * preset.stroke / 1000
+  const vc_recommended = vd / (cr_target - 1)
+  const rpmKeys = Object.keys(E_FACTOR).map(Number).sort((a, b) => a - b)
+  const nearestRpm = rpmKeys.reduce((prev, curr) =>
+    Math.abs(curr - preset.rpm) < Math.abs(prev - preset.rpm) ? curr : prev)
+  const E_recommended = preset.stroke * E_FACTOR[nearestRpm]
+  const Et_recommended = E_recommended + preset.stroke * ET_OFFSET_FACTOR
+  const portKeys = Object.keys(PORT_DIAMETER).map(Number).sort((a, b) => a - b)
+  const nearestPort = portKeys.reduce((prev, curr) =>
+    Math.abs(curr - cc) < Math.abs(prev - cc) ? curr : prev)
+  const dport = PORT_DIAMETER[nearestPort].typical
+  return {
+    bore: preset.bore, stroke: preset.stroke, rod: preset.rod,
+    rpm: preset.rpm, octane: preset.octane,
+    E: parseFloat(E_recommended.toFixed(1)),
+    Et: parseFloat(Et_recommended.toFixed(1)),
+    C: 0, vc: parseFloat(vc_recommended.toFixed(1)),
+    dport, label: preset.label, cr_target, nearestPreset: nearest,
+  }
+}
+
 // ─── base UI components ──────────────────────────────────────────────────────
 const S = {
   ok: '#15803d', warn: '#b45309', danger: '#b91c1c',
@@ -430,7 +490,6 @@ function ExhaustTab({ masterParams, onDone }) {
   const [type, setType] = useState('roadrace')
   const [diffStages, setDiffStages] = useState('1')
   const [sos, setSos] = useState('345')
-  const [octane, setOctane] = useState('92')
   const [result, setResult] = useState(null)
   const [dims, setDims] = useState(null)
   const [isModified, setIsModified] = useState(false)
@@ -498,7 +557,7 @@ function ExhaustTab({ masterParams, onDone }) {
   const segNames = ['Header', 'Diffuser', 'Belly', 'Baffle', 'Stinger']
 
   const sosHint = (() => {
-    const t = 450 + (p(octane) - 87) * 8
+    const t = 450 + ((masterParams?.octane ?? 92) - 87) * 8
     return `Estimasi SOS gas buang: ${Math.round(345 * Math.sqrt((t + 273) / 293))} m/s @ ${Math.round(t)}°C`
   })()
 
@@ -572,9 +631,6 @@ function ExhaustTab({ masterParams, onDone }) {
               { value: '3', label: '3 tahap' },
             ]} />
           </Field>
-          <Field label="Oktan Bahan Bakar" hint="Mempengaruhi SOS gas buang dan timing optimal">
-            <InputWithNotice value={octane} onChange={setOctane} step={1} min={80} max={102} warn={98} danger={102} />
-          </Field>
         </Grid>
         <Field label="Speed of Sound (m/s)" hint="Kecepatan rambat gelombang tekanan — naik seiring suhu gas, default 345 m/s @ 20°C">
           <InputWithNotice value={sos} onChange={setSos} step={1} warn={400} danger={450} />
@@ -642,7 +698,7 @@ function ExhaustTab({ masterParams, onDone }) {
               const portForGf = masterParams
                 ? { dur_ex: masterParams.dur_ex ?? effExDur, dur_tr: masterParams.dur_tr ?? effExDur - 26, blowdown: masterParams.blowdown ?? 26, cr: masterParams.cr ?? 12, rpm: masterParams.rpm ?? effRpm }
                 : { dur_ex: effExDur, dur_tr: effExDur - 26, blowdown: 26, cr: 12, rpm: effRpm }
-              const gf = calcGasFlow(portForGf, result, p(octane))
+              const gf = calcGasFlow(portForGf, result, masterParams?.octane ?? 92)
               return (
                 <Card title="Analisis Gas Flow & Aerodinamika">
                   <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>Kondisi gas buang</div>
@@ -810,28 +866,90 @@ function ExhaustTab({ masterParams, onDone }) {
   )
 }
 
+// ─── AutoRecommendPanel ──────────────────────────────────────────────────────
+function AutoRecommendPanel({ rec, onApply }) {
+  if (!rec) return null
+  return (
+    <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 12, padding: '16px 18px', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#15803d' }}>🎯 Rekomendasi Otomatis</div>
+          <div style={{ fontSize: 11, color: '#16a34a', marginTop: 2 }}>{rec.label} — preset terdekat: {rec.nearestPreset}cc</div>
+        </div>
+        <button onClick={() => onApply(rec)} style={{
+          padding: '6px 14px', background: '#15803d', color: '#fff', border: 'none',
+          borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0,
+        }}>Terapkan Semua</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+        <div style={{ background: '#fff', borderRadius: 8, padding: '10px 12px', border: '1px solid #bbf7d0' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#15803d', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>① Geometri Dasar</div>
+          <div style={{ fontSize: 12, lineHeight: 1.9, color: '#374151' }}>
+            <div>Bore: <strong>{rec.bore} mm</strong></div>
+            <div>Stroke: <strong>{rec.stroke} mm</strong></div>
+            <div>Con Rod: <strong>{rec.rod} mm</strong></div>
+            <div>RPM Peak: <strong>{rec.rpm}</strong></div>
+          </div>
+        </div>
+        <div style={{ background: '#fff', borderRadius: 8, padding: '10px 12px', border: '1px solid #bbf7d0' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#15803d', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>② Port Timing</div>
+          <div style={{ fontSize: 12, lineHeight: 1.9, color: '#374151' }}>
+            <div>E (exhaust): <strong>{rec.E} mm</strong></div>
+            <div>Et (transfer): <strong>{rec.Et} mm</strong></div>
+            <div>C (clearance): <strong>{rec.C} mm</strong></div>
+            <div>Port ⌀: <strong>{rec.dport} mm</strong></div>
+          </div>
+        </div>
+        <div style={{ background: '#fff', borderRadius: 8, padding: '10px 12px', border: '1px solid #bbf7d0' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#15803d', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>③ Ruang Bakar</div>
+          <div style={{ fontSize: 12, lineHeight: 1.9, color: '#374151' }}>
+            <div>CR target: <strong>{rec.cr_target}:1</strong></div>
+            <div>Vc: <strong>{rec.vc} cc</strong></div>
+            <div>Oktan: <strong>{rec.octane}</strong></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Modul 2: Port & Stroke Tab ──────────────────────────────────────────────
 function PortTab({ onMasterUpdate, onDone }) {
-  const [bore, setBore] = useState('54')
-  const [stroke, setStroke] = useState('54')
-  const [conrod, setConrod] = useState('105')
-  const [E, setE] = useState('17.5')
-  const [C, setC] = useState('0')
-  const [Et, setEt] = useState('25')
-  const [Vc, setVc] = useState('8.5')
-  const [rpm, setRpm] = useState('11000')
+  const [form, setForm] = useState({
+    bore: '54', stroke: '54', conrod: '105',
+    E: '17.5', C: '0', Et: '25', Vc: '8.5',
+    rpm: '11000', octane: '92', cc: '125', engineType: 'roadrace',
+  })
   const [result, setResult] = useState(null)
   const [formSnap, setFormSnap] = useState(null)
 
   const p = v => parseFloat(v) || 0
+  const set = key => val => setForm(f => ({ ...f, [key]: val }))
+
+  const rodRatio = p(form.stroke) > 0 ? p(form.conrod) / p(form.stroke) : 0
+  const rodWarn  = rodRatio > 0 && (rodRatio < 1.8 || rodRatio > 2.2)
+  const etWarn   = p(form.Et) > 0 && p(form.E) > 0 && p(form.Et) <= p(form.E)
+
+  const rec = p(form.cc) > 0 ? getRecommendations(p(form.cc), form.engineType) : null
+
+  const applyRec = r => setForm(f => ({
+    ...f,
+    bore: String(r.bore), stroke: String(r.stroke), conrod: String(r.rod),
+    rpm: String(r.rpm), octane: String(r.octane),
+    E: String(r.E), Et: String(r.Et), Vc: String(r.vc),
+  }))
 
   const calc = () => {
-    const f = { bore: p(bore), stroke: p(stroke), conrod: p(conrod), E: p(E), C: p(C), Et: p(Et), Vc: p(Vc), rpm: p(rpm) }
-    setFormSnap(f)
+    const f = {
+      bore: p(form.bore), stroke: p(form.stroke), conrod: p(form.conrod),
+      E: p(form.E), C: p(form.C), Et: p(form.Et), Vc: p(form.Vc), rpm: p(form.rpm),
+    }
+    setFormSnap({ ...f, octane: p(form.octane) })
     const res = calcPortData(f)
     setResult(res)
     onMasterUpdate?.({
       bore: f.bore, stroke: f.stroke, rod: f.conrod, E: f.E, C: f.C, Et: f.Et, vc: f.Vc, rpm: f.rpm,
+      octane: p(form.octane),
       dur_ex: res.exDur, dur_tr: res.trDur, blowdown: res.blowdown,
       cr: res.Cr, vd: res.Vd, piston_speed: res.Vp,
       epo: res.EPO, epc: res.EPC, tpo: res.TPO, tpc: res.TPC,
@@ -842,33 +960,60 @@ function PortTab({ onMasterUpdate, onDone }) {
 
   return (
     <div>
+      {rec && <AutoRecommendPanel rec={rec} onApply={applyRec} />}
       <Card title="Parameter Input" accent>
         <Grid cols={2}>
-          <Field label="Bore (mm)" hint="Diameter dalam silinder">
-            <InputWithNotice value={bore} onChange={setBore} step={0.5} warn={90} danger={105} />
+          <Field label="Displacement (cc)" hint="Digunakan untuk rekomendasi otomatis">
+            <NumInput value={form.cc} onChange={set('cc')} step={5} min={40} />
           </Field>
-          <Field label="Stroke (mm)" hint="Jarak tempuh piston dari TMA ke TMB">
-            <InputWithNotice value={stroke} onChange={setStroke} step={0.5} warn={90} danger={105} />
-          </Field>
-          <Field label="Panjang Con Rod (mm)" hint="Jarak center-to-center pena piston ke pena kruk as — biasanya 1.8–2× stroke">
-            <InputWithNotice value={conrod} onChange={setConrod} step={0.5} warn={220} danger={260} />
-          </Field>
-          <Field label="E — exhaust port ke atas barrel (mm)" hint="Menentukan kapan port buang mulai terbuka">
-            <InputWithNotice value={E} onChange={setE} step={0.5} warn={25} danger={35} />
-          </Field>
-          <Field label="C — deck clearance TDC (mm)" hint="Jarak piston ke bibir atas barrel saat di TMA — 0 jika flush">
-            <NumInput value={C} onChange={setC} step={0.1} />
-          </Field>
-          <Field label="Et — transfer port ke atas barrel (mm)" hint="Menentukan kapan port transfer mulai terbuka">
-            <NumInput value={Et} onChange={setEt} step={0.5} />
-          </Field>
-          <Field label="Volume Clearance Vc (cc)" hint="Volume ruang bakar saat piston di TMA">
-            <NumInput value={Vc} onChange={setVc} step={0.1} />
-          </Field>
-          <Field label="Target RPM" hint="RPM acuan untuk analisis piston speed">
-            <NumInput value={rpm} onChange={setRpm} step={100} />
+          <Field label="Tipe Mesin" hint="Karakteristik penggunaan mesin">
+            <Select value={form.engineType} onChange={set('engineType')} options={[
+              { value: 'roadrace', label: 'Road Race' },
+              { value: 'motocross', label: 'Motocross' },
+              { value: 'enduro', label: 'Enduro' },
+              { value: 'trail', label: 'Trail' },
+            ]} />
           </Field>
         </Grid>
+        <Grid cols={3}>
+          <Field label="Bore (mm)" hint="Diameter dalam silinder">
+            <InputWithNotice value={form.bore} onChange={set('bore')} step={0.5} warn={90} danger={105} />
+          </Field>
+          <Field label="Stroke (mm)" hint="Jarak tempuh piston dari TMA ke TMB">
+            <InputWithNotice value={form.stroke} onChange={set('stroke')} step={0.5} warn={90} danger={105} />
+          </Field>
+          <Field label="Con Rod (mm)" hint="Jarak center-to-center pena piston ke kruk as">
+            <InputWithNotice value={form.conrod} onChange={set('conrod')} step={0.5} warn={220} danger={260} />
+          </Field>
+          <Field label="E — exhaust port (mm)" hint="Tinggi port buang dari bibir atas barrel">
+            <InputWithNotice value={form.E} onChange={set('E')} step={0.5} warn={25} danger={35} />
+          </Field>
+          <Field label="C — deck clearance (mm)" hint="Jarak piston ke bibir atas barrel saat TMA">
+            <NumInput value={form.C} onChange={set('C')} step={0.1} />
+          </Field>
+          <Field label="Et — transfer port (mm)" hint="Tinggi port transfer dari bibir atas barrel">
+            <NumInput value={form.Et} onChange={set('Et')} step={0.5} />
+          </Field>
+          <Field label="Vc clearance volume (cc)" hint="Volume ruang bakar saat piston di TMA">
+            <NumInput value={form.Vc} onChange={set('Vc')} step={0.1} />
+          </Field>
+          <Field label="Target RPM" hint="RPM acuan untuk analisis piston speed">
+            <NumInput value={form.rpm} onChange={set('rpm')} step={100} />
+          </Field>
+          <Field label="Oktan Bahan Bakar" hint="Ketahanan bahan bakar terhadap detonasi">
+            <InputWithNotice value={form.octane} onChange={set('octane')} step={1} min={80} max={102} warn={98} danger={102} />
+          </Field>
+        </Grid>
+        {rodWarn && (
+          <div style={{ marginTop: 8, padding: '6px 10px', background: '#fef3c7', borderRadius: 6, fontSize: 12, color: '#b45309' }}>
+            ⚠ Rasio rod/stroke {fmt(rodRatio, 2)} di luar rentang ideal 1.8–2.2 — pertimbangkan ubah panjang con rod
+          </div>
+        )}
+        {etWarn && (
+          <div style={{ marginTop: 4, padding: '6px 10px', background: '#fee2e2', borderRadius: 6, fontSize: 12, color: '#b91c1c' }}>
+            ⚠ Et harus lebih besar dari E agar transfer port terbuka setelah exhaust port
+          </div>
+        )}
         <CalcBtn onClick={calc} />
       </Card>
 
@@ -1009,6 +1154,7 @@ function ECUTab({ masterParams, onDone }) {
       if (masterParams.rpm)    setRpmPeak(String(masterParams.rpm))
       if (masterParams.dur_ex) setExDur(masterParams.dur_ex.toFixed(1))
       if (masterParams.cr)     setCr(masterParams.cr.toFixed(1))
+      if (masterParams.octane) setOktan(String(masterParams.octane))
     }
   }
 
